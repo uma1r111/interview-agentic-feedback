@@ -21,22 +21,49 @@ logger = logging.getLogger("InterviewPipeline")
 def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Validates payload bundles and instantiates global pipeline state."""
     logger.info("--- START NODE: INGESTION ---")
-    # Extract raw data payload and mcq dictionary passed inside initial graph invocation
+    
+    # Extract raw parameters passed during API graph execution
     raw_payload = state.get("raw_payload", {})
     mcq_responses = state.get("mcq_responses", {})
     
+    # If initial_inputs passed them flat, fallback to compiling them from the root state
+    if not raw_payload:
+        raw_payload = {
+            "candidate_name": state.get("candidate_name"),
+            "role_type": state.get("role_type"),
+            "mcq_score": state.get("mcq_score"),
+            "programming_answers": state.get("programming_answers"),
+            "session1_transcript": state.get("session1_transcript"),
+            "session2_transcript": state.get("session2_transcript")
+        }
+
     agent = IngestionAgent()
     updated_state, success = agent.process_intake(raw_payload, mcq_responses)
     
     if not success:
+        logger.error(f"Ingestion processing failure: {updated_state.get('error')}")
         return {"error": updated_state.get("error")}
-    return updated_state
+        
+    # FIX: Return a clean state update dictionary back to LangGraph.
+    # This guarantees all tracking keys are flattened out and safely committed
+    # directly into LangGraph's global root-level state dictionary space.
+    return {
+        "candidate_id": updated_state.get("candidate_id"),
+        "candidate_name": updated_state.get("candidate_name"),
+        "role_type": updated_state.get("role_type"),
+        "mcq_score": updated_state.get("mcq_score"),
+        "programming_answers": updated_state.get("programming_answers"),
+        "session1_transcript": updated_state.get("session1_transcript"),
+        "session2_transcript": updated_state.get("session2_transcript"),
+        "error": None
+    }
 
 def communication_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates text-based dialogue dynamics inside Session 1."""
     logger.info("--- START NODE: COMMUNICATION EVALUATOR ---")
     agent = CommunicationAgent()
-    score, _ = agent.evaluate_communication(state["session1_transcript"])
+    transcript = state.get("session1_transcript", "")
+    score, _ = agent.evaluate_communication(transcript)
     return {"communication_score": score}
 
 def technical_depth_node(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -44,9 +71,9 @@ def technical_depth_node(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("--- START NODE: TECHNICAL DEPTH EVALUATOR ---")
     agent = TechnicalDepthAgent()
     score, _ = agent.evaluate_technical_depth(
-        role_type=state["role_type"],
-        session1_transcript=state["session1_transcript"],
-        programming_answers=state["programming_answers"]
+        role_type=state.get("role_type"),
+        session1_transcript=state.get("session1_transcript", ""),
+        programming_answers=state.get("programming_answers", ["", ""])
     )
     return {"technical_score": score}
 
@@ -54,25 +81,26 @@ def problem_solving_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates conceptual mapping and structural breakdown behaviors."""
     logger.info("--- START NODE: PROBLEM SOLVING EVALUATOR ---")
     agent = ProblemSolvingAgent()
-    score, _ = agent.evaluate_problem_solving(state["session1_transcript"])
+    score, _ = agent.evaluate_problem_solving(state.get("session1_transcript", ""))
     return {"problem_solving_score": score}
 
 def cultural_alignment_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates team motivation and values markers strictly from Session 2."""
     logger.info("--- START NODE: CULTURAL ALIGNMENT EVALUATOR ---")
     agent = CulturalAlignmentAgent()
-    score, _ = agent.evaluate_cultural_alignment(state["session2_transcript"])
+    transcript = state.get("session2_transcript", "")
+    score, _ = agent.evaluate_cultural_alignment(transcript)
     return {"cultural_score": score}
 
 def bias_detection_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Sweeps narrative observations for subjective or loaded expressions."""
+    """Subjective language sweep over all dimensional observations."""
     logger.info("--- START NODE: BIAS DETECTION GUARDRAIL GATE ---")
     agent = BiasDetectionAgent()
     log, sanitized_scores, clear_flag, _ = agent.analyze_and_sanitize_scores(
-        communication=state["communication_score"],
-        technical=state["technical_score"],
-        problem_solving=state["problem_solving_score"],
-        cultural=state["cultural_score"]
+        communication=state.get("communication_score"),
+        technical=state.get("technical_score"),
+        problem_solving=state.get("problem_solving_score"),
+        cultural=state.get("cultural_score")
     )
     return {
         "bias_log": log,
@@ -88,15 +116,15 @@ def feedback_compiler_node(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("--- START NODE: FEEDBACK COMPILER ---")
     agent = FeedbackCompilerAgent()
     report, _ = agent.compile_final_report(
-        candidate_name=state["candidate_name"],
-        role_type=state["role_type"],
-        mcq_score=state["mcq_score"],
-        programming_answers=state["programming_answers"],
-        communication=state["communication_score"],
-        technical=state["technical_score"],
-        problem_solving=state["problem_solving_score"],
-        cultural=state["cultural_score"],
-        bias_clear=state["bias_clear"]
+        candidate_name=state.get("candidate_name", ""),
+        role_type=state.get("role_type"),
+        mcq_score=state.get("mcq_score", 0.0),
+        programming_answers=state.get("programming_answers", ["", ""]),
+        communication=state.get("communication_score"),
+        technical=state.get("technical_score"),
+        problem_solving=state.get("problem_solving_score"),
+        cultural=state.get("cultural_score"),
+        bias_clear=state.get("bias_clear", False)
     )
     return {"feedback_report": report}
 
@@ -112,6 +140,20 @@ def route_after_bias_gate(state: Dict[str, Any]) -> Literal["compile_report", "a
     
     logger.info("Conditional Edge: Security parameters verified. Authorizing feedback report assembly.")
     return "compile_report"
+
+def route_after_ingestion(state: Dict[str, Any]) -> Any:
+    """
+    Short-circuits the workflow topology instantly if validation mismatch flags 
+    are tripped, or flags a parallel multi-destination path array.
+    """
+    if state.get("error"):
+        logger.error("Ingestion data verification failure detected. Blocking downstream agent processing.")
+        return "abort_pipeline"
+    
+    # LangGraph conditional router functions can return an array of keys 
+    # indicating multiple downstream vertices should be triggered concurrently!
+    return ["evaluate_communication", "evaluate_technical", "evaluate_problem_solving", "evaluate_cultural"]
+    return "continue_evaluation"    
 
 # ==============================================================================
 # Pipeline Topology Assembler Builder
@@ -131,22 +173,32 @@ def create_interview_graph():
     builder.add_node("verify_bias_gate", bias_detection_node)
     builder.add_node("compile_report", feedback_compiler_node)
     
-    # 3. Establish flow boundaries and map conditional branches
+    # 3. Establish flow boundaries
+    # 3. Establish flow boundaries
     builder.add_edge(START, "ingest")
     
-    # Parallel Branch Fan-Out: Trigger downstream analytics concurrently
-    builder.add_edge("ingest", "evaluate_communication")
-    builder.add_edge("ingest", "evaluate_technical")
-    builder.add_edge("ingest", "evaluate_problem_solving")
-    builder.add_edge("ingest", "evaluate_cultural")
+    # FIX: Clean, hashable 1:1 key-value map layout.
+    # The dictionary keys tell LangGraph what the function *might* return, 
+    # matching the exact identity string of the destination nodes perfectly.
+    builder.add_conditional_edges(
+        "ingest",
+        route_after_ingestion,
+        {
+            "evaluate_communication": "evaluate_communication",
+            "evaluate_technical": "evaluate_technical",
+            "evaluate_problem_solving": "evaluate_problem_solving",
+            "evaluate_cultural": "evaluate_cultural",
+            "abort_pipeline": END
+        }
+    )
     
-    # Parallel Branch Fan-In: Synchronize all parallel analytical operations into the validation gate
+    # Parallel Branch Fan-In: Synchronize parallel operations back into the validation gate
     builder.add_edge("evaluate_communication", "verify_bias_gate")
     builder.add_edge("evaluate_technical", "verify_bias_gate")
     builder.add_edge("evaluate_problem_solving", "verify_bias_gate")
     builder.add_edge("evaluate_cultural", "verify_bias_gate")
     
-    # 4. Integrate strict conditional gating constraints
+    # 4. Integrate strict conditional gating constraints after the bias check
     builder.add_conditional_edges(
         "verify_bias_gate",
         route_after_bias_gate,

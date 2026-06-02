@@ -18,13 +18,28 @@ class TechnicalDepthAgent(BaseAgent):
         super().__init__()
         logger.info("Production-tier Technical Depth Agent initialized successfully.")
 
-    def _load_and_compile_rubric(self, role_type: RoleType) -> Dict[str, Any]:
+    def _load_and_compile_rubric(self, role_type: Any) -> Dict[str, Any]:
         """
         Dynamically loads the appropriate evaluation rubric file from disk.
         Features polymorphic inheritance resolution to cleanly merge base SWE characteristics 
         if an 'extends' directive is encountered inside a target track.
         """
-        filename = "ai_engineer.json" if role_type == RoleType.AI_ENGINEER else f"{role_type.value.lower()}.json"
+        # Convert enum or string to a standardized string format
+        role_str = role_type.value if hasattr(role_type, 'value') else str(role_type)
+        role_str = role_str.strip().upper()
+
+        # Map the shorthand API token to the exact structural filename on disk
+        if role_str == "AI":
+            filename = "ai_engineer.json"
+        elif role_str == "SWE":
+            filename = "swe.json"
+        elif role_str == "BA":
+            filename = "ba.json"
+        elif role_str == "TRAINEE":
+            filename = "trainee.json"
+        else:
+            filename = f"{role_str.lower()}.json"
+
         rubric_path = os.path.join("rubrics", filename)
         
         try:
@@ -36,7 +51,7 @@ class TechnicalDepthAgent(BaseAgent):
             
             # Polymorphic Check: Does this specialization inherit from a baseline track?
             if "extends" in rubric_data and rubric_data["extends"] == "SWE":
-                logger.info(f"Rubric expansion detected. Merging base SWE metrics into specialization: {role_type}")
+                logger.info(f"Rubric expansion detected. Merging base SWE metrics into specialization: {role_str}")
                 swe_path = os.path.join("rubrics", "swe.json")
                 
                 with open(swe_path, "r", encoding="utf-8") as swe_file:
@@ -46,7 +61,7 @@ class TechnicalDepthAgent(BaseAgent):
                 compiled_dimensions = {**swe_base.get("dimensions", {}), **rubric_data.get("dimensions", {})}
                 rubric_data["dimensions"] = compiled_dimensions
                 
-            logger.info(f"Successfully loaded and compiled technical rubric mapping for track: {role_type}")
+            logger.info(f"Successfully loaded and compiled technical rubric mapping for track: {role_str}")
             return rubric_data
 
         except Exception as e:
@@ -60,7 +75,7 @@ class TechnicalDepthAgent(BaseAgent):
 
     def evaluate_technical_depth(
         self, 
-        role_type: RoleType, 
+        role_type: Any, 
         session1_transcript: str, 
         programming_answers: list[str]
     ) -> Tuple[EvalScore, Dict[str, int]]:
@@ -79,7 +94,7 @@ class TechnicalDepthAgent(BaseAgent):
         # 1. Fetch and structurally resolve the dynamic rubric architecture tree map
         compiled_rubric = self._load_and_compile_rubric(role_type)
         
-        logger.info(f"Executing analytical technical depth evaluation for role: {role_type}")
+        logger.info(f"Executing analytical technical depth evaluation for role payload tracker: {role_type}")
 
         system_prompt = (
             "You are an elite Principal Systems Architect and Lead Machine Learning Engineer.\n"
@@ -88,7 +103,7 @@ class TechnicalDepthAgent(BaseAgent):
             f"CRITICAL ASSIGNMENT: You must explicitly grade the applicant against these exact dimensions and definitions:\n"
             f"{json.dumps(compiled_rubric, indent=2)}\n\n"
             "Execution Audit Data Rules:\n"
-            "1. Core Systems & Projects: Cross-verify any listed architectural experiences (like AWS RDS, Redis caching, or MLOps pipelines) "
+            "1. Core Systems & Projects: Cross-verify any listed architectural experiences "
             "against their conversational logic. Detect depth vs script copying.\n"
             "2. Programming Artifact Analysis: Grade code execution logic, memory optimization, and time complexity parameters "
             "separately from syntax spacing mistakes.\n\n"
@@ -100,8 +115,8 @@ class TechnicalDepthAgent(BaseAgent):
 
         user_prompt = (
             f"--- START CANDIDATE CODE REPOSITORY TRACKS ---\n"
-            f"[SUBMISSION CODE Q1 - ARRAY SORTING/MERGING]:\n{programming_answers[0]}\n\n"
-            f"[SUBMISSION CODE Q2 - TYPE MISMATCH CORRECTION]:\n{programming_answers[1]}\n"
+            f"[SUBMISSION CODE Q1]:\n{programming_answers[0]}\n\n"
+            f"[SUBMISSION CODE Q2]:\n{programming_answers[1]}\n"
             f"--- END CANDIDATE CODE REPOSITORY TRACKS ---\n\n"
             f"--- START CONVERSATIONAL TECHNICAL PANEL DIALOGUE BLOCK ---\n"
             f"{session1_transcript}\n"

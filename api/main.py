@@ -61,13 +61,20 @@ def submit_candidate_intake(payload: IntakeRequestPayload) -> Dict[str, str]:
     try:
         logger.info(f"API: Received pipeline evaluation request for candidate: {payload.candidate_data.candidate_name}")
         
-        # Prepare the raw seed inputs required by the LangGraph ingestion node structure
+        # FIX: Explicitly break out and pass the individual attributes at the root level 
+        # so LangGraph's shared state maps them correctly right at invocation boot-up
         initial_inputs = {
+            "candidate_name": payload.candidate_data.candidate_name,
+            "role_type": payload.candidate_data.role_type,
+            "mcq_score": payload.candidate_data.mcq_score,
+            "programming_answers": payload.candidate_data.programming_answers,
+            "session1_transcript": payload.candidate_data.session1_transcript,
+            "session2_transcript": payload.candidate_data.session2_transcript,
             "raw_payload": payload.candidate_data.model_dump(),
             "mcq_responses": payload.mcq_selections
         }
         
-        # Invoke the stateful LangGraph pipeline synchronously for the vertical slice
+        # Invoke the stateful LangGraph pipeline synchronously
         final_output_state = interview_graph.invoke(initial_inputs)
         
         # Check if the ingestion node or downstream processing threw a fatal exception
@@ -79,8 +86,6 @@ def submit_candidate_intake(payload: IntakeRequestPayload) -> Dict[str, str]:
             )
             
         candidate_id = final_output_state["candidate_id"]
-        
-        # Commit the fully evaluated state payload safely to our operational transactional cache
         CANDIDATE_DB[candidate_id] = final_output_state
         logger.info(f"API: Evaluation cycle completed. Candidate saved with ID: {candidate_id}")
         
