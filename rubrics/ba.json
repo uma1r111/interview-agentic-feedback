@@ -1,0 +1,11 @@
+{
+  "role_type": "BA",
+  "dimensions": {
+    "requirements_gathering": "Evaluates user story decomposition, business scope discovery, and process engineering mapping.",
+    "stakeholder_communication": "Evaluates clarity of delivery, conflict resolution framing, and translation of technical requirements to business values.",
+    "analytical_thinking": "Evaluates metric tracking design, KPI optimization analysis, and data-driven prioritization approaches.",
+    "sql": "Evaluates complex aggregations, window operations, performance indexing, and multi-table joining techniques.",
+    "excel": "Evaluates advanced model forecasting, macro processing, array lookups, and pivot data summaries.",
+    "power_bi": "Evaluates semantic model design, DAX calculated metric formulas, and interactive canvas layout usability."
+  }
+}

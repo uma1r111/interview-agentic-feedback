@@ -1,0 +1,9 @@
+{
+  "role_type": "Trainee",
+  "dimensions": {
+    "learning_agility": "Evaluates code assimilation speed, coachability signals, feedback loop processing, and abstract interest.",
+    "problem_decomposition": "Evaluates splitting complex prompts into step-by-step modular procedural code functions.",
+    "cs_fundamentals": "Evaluates basic loops, conditional array arrays, type primitives, and foundational computer logic flow."
+  },
+  "grading_curve": "soft_assessment_scale"
+}

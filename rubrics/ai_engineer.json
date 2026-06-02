@@ -1,0 +1,15 @@
+{
+  "role_type": "AI",
+  "extends": "SWE",
+  "dimensions": {
+    "algorithms": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
+    "system_design": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",
+    "debugging": "Evaluates code navigation, root-cause isolation speed, and edge case correction patterns.",
+    "code_quality_reasoning": "Evaluates clean code philosophy, readability choices, naming conventions, and structural maintainability reasoning.",
+    "langgraph_familiarity": "Evaluates understanding of stateful multi-agent DAGs, loop boundaries, and memory persistence channels.",
+    "rag_delivery_experience": "Evaluates chunking strategies, vector embeddings storage management, and contextual retrieval matching pipelines.",
+    "hallucination_handling": "Evaluates guardrail implementation patterns, evaluation criteria validation, and safety system prompts.",
+    "quantization": "Evaluates model compression understanding, FP16/INT8 weight optimization, and memory footprint management.",
+    "ml_fundamentals": "Evaluates cross-validation, loss function optimization mechanics, and neural token attention math foundations."
+  }
+}
