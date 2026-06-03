@@ -28,20 +28,16 @@ class IngestionAgent:
             from models.candidate import CandidateBundle
             validated_bundle = CandidateBundle(**data_to_validate)
             
-            # Polymorphic Scoring Call Resolution:
-            # Check which naming variant your physical TestProcessorService instance exposes
-            if hasattr(self.test_processor, "score_mcqs"):
-                scored_mcq = self.test_processor.score_mcqs(mcq_responses)
-            elif hasattr(self.test_processor, "process_mcq_answers"):
-                scored_mcq = self.test_processor.process_mcq_answers(mcq_responses)
-            elif hasattr(self.test_processor, "evaluate_mcqs"):
-                scored_mcq = self.test_processor.evaluate_mcqs(mcq_responses)
-            else:
-                # If the method cannot be resolved programmatically, inspect public properties 
-                # or fallback safely to preserving the user's raw input baseline data
-                logger.warning("Could not resolve specific MCQ scoring method signature. Falling back to baseline tracking mapping.")
-                scored_mcq = float(validated_bundle.mcq_score)
-
+            # Direct call to TestProcessorService using the correct method signature.
+            # role_type.value converts the RoleType enum to its string form ("AI", "SWE", etc.)
+            # so the answer key registry lookup inside score_test_intake resolves correctly.
+            test_result = self.test_processor.score_test_intake(
+                role_type=validated_bundle.role_type.value,
+                candidate_mcq_responses=mcq_responses,
+                raw_programming_answers=validated_bundle.programming_answers
+            )
+            scored_mcq = test_result.mcq_score_out_of_five
+            logger.info(f"MCQ programmatic scoring complete. Normalized score: {scored_mcq}/5.0")
             # Compile the clean flat state output dict object mapping cleanly to global channels
             output_state = {
                 "candidate_id": f"cand_{validated_bundle.candidate_name.lower().replace(' ', '_')}",
