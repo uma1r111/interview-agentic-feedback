@@ -145,12 +145,7 @@ def route_after_ingestion(state: Dict[str, Any]) -> Literal["abort_pipeline", "c
     if state.get("error"):
         logger.error("Ingestion validation failure. Blocking downstream agents.")
         return "abort_pipeline"
-    return "continue"
-    
-    # LangGraph conditional router functions can return an array of keys 
-    # indicating multiple downstream vertices should be triggered concurrently!
-    return ["evaluate_communication", "evaluate_technical", "evaluate_problem_solving", "evaluate_cultural"]
-    return "continue_evaluation"    
+    return "continue"   
 
 # ==============================================================================
 # Pipeline Topology Assembler Builder
