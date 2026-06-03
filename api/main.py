@@ -76,6 +76,12 @@ def submit_candidate_intake(payload: IntakeRequestPayload) -> Dict[str, str]:
         
         # Invoke the stateful LangGraph pipeline synchronously
         final_output_state = interview_graph.invoke(initial_inputs)
+
+        logger.info(f"Final state keys: {list(final_output_state.keys())}")
+        logger.info(f"feedback_report: {final_output_state.get('feedback_report')}")
+        logger.info(f"bias_clear: {final_output_state.get('bias_clear')}")
+        logger.info(f"bias_log: {final_output_state.get('bias_log')}")
+        logger.info(f"error: {final_output_state.get('error')}")
         
         # Check if the ingestion node or downstream processing threw a fatal exception
         if final_output_state.get("error"):

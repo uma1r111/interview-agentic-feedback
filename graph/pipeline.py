@@ -141,14 +141,11 @@ def route_after_bias_gate(state: Dict[str, Any]) -> Literal["compile_report", "a
     logger.info("Conditional Edge: Security parameters verified. Authorizing feedback report assembly.")
     return "compile_report"
 
-def route_after_ingestion(state: Dict[str, Any]) -> Any:
-    """
-    Short-circuits the workflow topology instantly if validation mismatch flags 
-    are tripped, or flags a parallel multi-destination path array.
-    """
+def route_after_ingestion(state: Dict[str, Any]) -> Literal["abort_pipeline", "continue"]:
     if state.get("error"):
-        logger.error("Ingestion data verification failure detected. Blocking downstream agent processing.")
+        logger.error("Ingestion validation failure. Blocking downstream agents.")
         return "abort_pipeline"
+    return "continue"
     
     # LangGraph conditional router functions can return an array of keys 
     # indicating multiple downstream vertices should be triggered concurrently!
@@ -172,32 +169,34 @@ def create_interview_graph():
     builder.add_node("evaluate_cultural", cultural_alignment_node)
     builder.add_node("verify_bias_gate", bias_detection_node)
     builder.add_node("compile_report", feedback_compiler_node)
-    
-    # 3. Establish flow boundaries
+
     # 3. Establish flow boundaries
     builder.add_edge(START, "ingest")
     
     # FIX: Clean, hashable 1:1 key-value map layout.
     # The dictionary keys tell LangGraph what the function *might* return, 
     # matching the exact identity string of the destination nodes perfectly.
+    # Error-only conditional — abort if ingestion failed, otherwise fan out
     builder.add_conditional_edges(
         "ingest",
         route_after_ingestion,
         {
-            "evaluate_communication": "evaluate_communication",
-            "evaluate_technical": "evaluate_technical",
-            "evaluate_problem_solving": "evaluate_problem_solving",
-            "evaluate_cultural": "evaluate_cultural",
-            "abort_pipeline": END
+            "abort_pipeline": END,
+            "continue": "evaluate_communication"
         }
     )
-    
-    # Parallel Branch Fan-In: Synchronize parallel operations back into the validation gate
-    builder.add_edge("evaluate_communication", "verify_bias_gate")
-    builder.add_edge("evaluate_technical", "verify_bias_gate")
-    builder.add_edge("evaluate_problem_solving", "verify_bias_gate")
-    builder.add_edge("evaluate_cultural", "verify_bias_gate")
-    
+
+    # Parallel fan-out — LangGraph executes all four concurrently
+    builder.add_edge("ingest", "evaluate_technical")
+    builder.add_edge("ingest", "evaluate_problem_solving")
+    builder.add_edge("ingest", "evaluate_cultural")
+
+    # Fan-in — wait for ALL four parallel branches before bias gate
+    builder.add_edge(
+        ["evaluate_communication", "evaluate_technical", "evaluate_problem_solving", "evaluate_cultural"],
+        "verify_bias_gate"
+    )
+
     # 4. Integrate strict conditional gating constraints after the bias check
     builder.add_conditional_edges(
         "verify_bias_gate",

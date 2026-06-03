@@ -67,34 +67,46 @@ class BaseAgent:
         
         try:
             # Enforce structured validation layout at the native LLM api border
-            structured_llm = self.llm.with_structured_output(response_model)
-            
-            # Formulate structured message payload arrays
+            structured_llm = self.llm.with_structured_output(
+                response_model,
+                include_raw=True
+            )
+
             messages = [
                 ("system", system_prompt),
                 ("user", user_prompt)
             ]
-            
-            # Invoke generation
+
             response = structured_llm.invoke(messages)
-            
-            # Extract runtime token utilization telemetry out of the execution response block
-            if hasattr(response, "response_metadata") and "token_usage" in response.response_metadata:
-                usage = response.response_metadata["token_usage"]
+
+            # With include_raw=True, response is a dict:
+            # { "raw": AIMessage, "parsed": YourPydanticModel, "parsing_error": None }
+            parsed_output = response.get("parsed")
+            raw_message = response.get("raw")
+
+            # Extract token usage from the raw AIMessage
+            if raw_message and hasattr(raw_message, "response_metadata"):
+                usage = raw_message.response_metadata.get("token_usage", {})
                 token_metadata["prompt_tokens"] = usage.get("prompt_tokens", 0)
                 token_metadata["completion_tokens"] = usage.get("completion_tokens", 0)
                 token_metadata["total_tokens"] = usage.get("total_tokens", 0)
-            
-            # Enforce context boundary rules monitoring
+
+            # Check for parsing errors
+            parsing_error = response.get("parsing_error")
+            if parsing_error:
+                logger.error(f"Structured output parsing error: {parsing_error}")
+                return None, token_metadata
+
+            # Enforce context boundary rule
             if token_metadata["total_tokens"] >= TOKEN_ALERT_THRESHOLD:
                 logger.critical(
                     f"CRITICAL TOKEN BREACH WARNING: Single execution call consumed "
-                    f"{token_metadata['total_tokens']} tokens! Boundary safety threshold rule is set to {TOKEN_ALERT_THRESHOLD}."
+                    f"{token_metadata['total_tokens']} tokens! Threshold is {TOKEN_ALERT_THRESHOLD}."
                 )
             else:
-                logger.info(f"Execution call completed successfully. Tokens consumed: {token_metadata['total_tokens']}.")
+                logger.info(f"Execution call completed. Tokens consumed: {token_metadata['total_tokens']}.")
 
-            return response, token_metadata
+            return parsed_output, token_metadata
 
         except Exception as e:
             logger.error(f"Isolated Runtime Error caught during LLM generation execution step: {str(e)}")
