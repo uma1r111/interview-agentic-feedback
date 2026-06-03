@@ -1,0 +1,300 @@
+{
+  "llm_council_session": {
+    "purpose": "Structured peer review of the AI Interview Feedback System codebase against the Grill Me session decisions and PRD v1.0",
+    "session_type": "Codebase Audit — Post Implementation Review",
+    "project": "AI Interview Feedback System",
+    "prd_version": "v1.0",
+    "verdict_summary": "Architecturally well-conceived, structurally close to PRD, but contains three breaking bugs and one unfulfilled PRD promise that must be resolved before the system can run end-to-end.",
+
+    "stage_1_advisors": {
+
+      "advisor_1_contrarian": {
+        "role": "Find what will fail. Where does this break? What is the user not seeing?",
+        "verdict": "This codebase will not run end-to-end as written.",
+        "critical_bugs_identified": [
+          {
+            "bug_id": "BUG-01",
+            "title": "LangGraph parallel branching is broken",
+            "file": "graph/pipeline.py",
+            "function": "route_after_ingestion",
+            "description": "The routing function returns a list ['evaluate_communication', 'evaluate_technical', 'evaluate_problem_solving', 'evaluate_cultural']. LangGraph's add_conditional_edges with a dictionary mapping does not support returning a list to trigger parallel branches. This is not how LangGraph parallelism works. Parallel execution requires Send objects or direct add_edge calls from one node to multiple nodes.",
+            "evidence": "Dead unreachable line 'return continue_evaluation' exists directly after the list return — proves this path was never tested end-to-end.",
+            "severity": "CRITICAL — pipeline will throw runtime error or silently execute only one branch"
+          },
+          {
+            "bug_id": "BUG-02",
+            "title": "InterviewState inherits from dict instead of TypedDict",
+            "file": "models/candidate.py",
+            "description": "LangGraph requires a TypedDict as the state schema. Inheriting from dict directly means LangGraph cannot introspect state fields, cannot validate updates, and will behave unpredictably when nodes return partial state updates.",
+            "severity": "CRITICAL — silent state corruption across all nodes"
+          },
+          {
+            "bug_id": "BUG-03",
+            "title": "IngestionAgent MCQ method resolution chain always falls back silently",
+            "file": "agents/ingestion_agent.py",
+            "description": "The agent tries hasattr checks for score_mcqs, then process_mcq_answers, then evaluate_mcqs — none of which exist on TestProcessorService. The actual method is score_test_intake which requires three arguments: role_type, candidate_mcq_responses, and raw_programming_answers. The ingestion agent never passes those. It falls back silently to float(validated_bundle.mcq_score) every single time.",
+            "consequence": "TestProcessorService is completely dead code. MCQ auto-scoring never executes.",
+            "severity": "HIGH — core feature silently broken"
+          },
+          {
+            "bug_id": "BUG-04",
+            "title": "base_agent.py uses AzureChatOpenAI — PRD confirmed Claude (Anthropic)",
+            "file": "agents/base_agent.py",
+            "description": "The confirmed tech stack from the Grill Me session and PRD v1.0 specified Claude (Anthropic) as the LLM provider. The implementation uses AzureChatOpenAI from langchain_openai. This is a direct violation of a confirmed architectural decision.",
+            "secondary_issue": "Token metadata extraction assumes response_metadata['token_usage'] exists on a structured output response. Structured outputs via with_structured_output return the Pydantic model directly, not a response object with metadata. Token tracking logs zero tokens every single call.",
+            "severity": "HIGH — wrong LLM provider, broken token tracking"
+          },
+          {
+            "bug_id": "BUG-05",
+            "title": "Pydantic v2 field constraint syntax errors",
+            "files": ["models/evaluation.py", "models/candidate.py"],
+            "description": "FeedbackReport uses min_items and max_items on list fields. CandidateBundle uses min_items=2, max_items=2 on programming_answers. These are Pydantic v1 syntax. The installed version is pydantic==2.13.4. In Pydantic v2 the correct constraints are min_length and max_length.",
+            "consequence": "Constraints are silently not enforced. A candidate can be submitted with zero programming answers or ten.",
+            "severity": "MEDIUM — silent validation bypass"
+          }
+        ]
+      },
+
+      "advisor_2_first_principles": {
+        "role": "Strip away assumptions. Rebuild from scratch. What is actually being asked?",
+        "core_question": "What problem is actually being solved?",
+        "answer": "Evaluating a human candidate consistently and fairly using AI. The agents, graph, API, and dashboard are all delivery infrastructure. The quality of the evaluation is the only thing that matters.",
+        "fundamental_architectural_gap_identified": {
+          "title": "Missing transcript preprocessing layer",
+          "description": "Every evaluation agent sends the entire raw transcript to the LLM in a single call. A 45-minute technical interview at average speaking pace is roughly 6,000 to 9,000 words — approximately 8,000 to 12,000 tokens for the transcript alone. Add system prompt, rubric JSON, and programming answers and a single Technical Depth Agent call approaches 15,000 to 20,000 tokens.",
+          "root_problem": "Nowhere in the codebase is there any chunking, transcript preprocessing, or speaker isolation before the LLM call. The agent receives raw diarized text with timestamps and speaker labels mixed in. The LLM must do transcript parsing AND evaluation simultaneously — two jobs in one prompt, degrading the quality of both.",
+          "first_principles_question": "What is the minimum input the evaluation LLM actually needs?",
+          "answer": "Not timestamps. Not interviewer questions in most cases — only candidate responses. A preprocessing step that isolates candidate speech turns from diarized transcript before passing to evaluation agents would improve evaluation quality, reduce token consumption, and make evidence quotes more precise.",
+          "recommendation": "Add a transcript preprocessing step before any evaluation agent runs. Extract candidate-only speech turns. Strip timestamps and speaker label formatting. Pass clean candidate responses to agents."
+        }
+      },
+
+      "advisor_3_expansionist": {
+        "role": "Find the upside being missed. What is the bigger version of this?",
+        "reframe": "This system is scoped as an internal hiring tool. That is the smallest possible version of what this could be.",
+        "actual_product_built": "A rubric-driven, role-aware, multi-dimensional candidate evaluation engine with bias detection and structured output — a candidate intelligence platform.",
+        "expansion_opportunities": [
+          {
+            "opportunity": "Longitudinal candidate tracking",
+            "description": "Each evaluation is currently stateless — one candidate, one report, gone. If every evaluation is stored with timestamps, the system can track how candidates evolve across application attempts.",
+            "example_signal": "A trainee who applied twice and improved technical score from 2 to 4 is a fundamentally different signal than a lateral hire who scored 4 both times.",
+            "implementation_cost": "Low — data model already supports it. Requires a persistent database and a candidate history endpoint.",
+            "architectural_distance": "One step away from current implementation"
+          },
+          {
+            "opportunity": "Interviewer calibration and bias audit product",
+            "description": "The Bias Detection Agent already logs corrections. Aggregate those logs across 50 interviews and you can surface which interviewers consistently generate biased language.",
+            "product_potential": "A standalone HR compliance product that organizations pay for separately from hiring automation.",
+            "implementation_cost": "Low — BiasLog model already exists. Requires aggregation queries and one additional dashboard view.",
+            "architectural_distance": "One step away from current implementation"
+          },
+          {
+            "opportunity": "Benchmark relative scoring",
+            "description": "Scores are currently absolute (1-5). If all historical reports are stored, every new score becomes relative — this candidate's technical depth is in the 73rd percentile of AI engineers evaluated in the last 6 months.",
+            "product_potential": "Transforms evaluation output from a score into a market intelligence signal.",
+            "implementation_cost": "Medium — requires database, percentile calculation queries, dashboard visualization.",
+            "architectural_distance": "Two steps from current implementation"
+          }
+        ],
+        "note": "None of these require a new agent. They require a database, aggregation queries, and additional dashboard views."
+      },
+
+      "advisor_4_outsider": {
+        "role": "Zero context. Smart generalist seeing this for the first time. What looks weird?",
+        "observations": [
+          {
+            "observation_id": "OBS-01",
+            "title": "No real interview ingestion mechanism exists",
+            "description": "The system evaluates candidates but has no way to ingest a real interview. The only input mechanism is a JSON fixture file submitted via submit_test.py. There is no upload endpoint for audio files. There is no Whisper integration in the running code — services/transcription.py is listed in the directory plan but does not exist in the codebase.",
+            "current_workflow": "Manually paste full interview transcript as a string into a JSON file.",
+            "assessment": "This is a demo harness, not a product."
+          },
+          {
+            "observation_id": "OBS-02",
+            "title": "Dashboard has no candidate list — missing primary navigation surface",
+            "description": "The PRD specified a candidate list table as the primary dashboard view. What exists is a single-candidate lookup by ID. The hiring manager must already know the candidate ID to use the dashboard at all.",
+            "current_workflow_steps": [
+              "Run submit_test.py in a terminal",
+              "Copy the printed ID from console output",
+              "Open Streamlit in browser",
+              "Paste the ID into sidebar input",
+              "Click Load Assessment Profile"
+            ],
+            "assessment": "Four manual steps before seeing any data. Dashboard is missing its primary navigation surface."
+          },
+          {
+            "observation_id": "OBS-03",
+            "title": "System claims production-tier in comments but uses in-memory dictionary as database",
+            "file": "api/main.py",
+            "evidence": "CANDIDATE_DB: Dict[str, Dict[str, Any]] = {}",
+            "description": "The phrase 'production-tier' appears in agent docstrings throughout the codebase. The data layer is an in-memory Python dictionary. Every FastAPI server restart wipes all candidate records.",
+            "assessment": "Polished facade with a missing foundation."
+          }
+        ]
+      },
+
+      "advisor_5_executor": {
+        "role": "Skip theory. What is the single concrete action to take first? What ships this week?",
+        "priority_fixes": [
+          {
+            "fix_id": "FIX-01",
+            "priority": 1,
+            "title": "Fix InterviewState to use TypedDict",
+            "file": "models/candidate.py",
+            "change": "Change 'class InterviewState(dict)' to 'class InterviewState(TypedDict)'",
+            "effort": "1 line change",
+            "impact": "Unblocks entire LangGraph pipeline from silent state corruption"
+          },
+          {
+            "fix_id": "FIX-02",
+            "priority": 2,
+            "title": "Fix parallel branching in pipeline.py",
+            "file": "graph/pipeline.py",
+            "change": "Replace route_after_ingestion conditional edge approach for parallel execution with direct add_edge calls from ingest to each evaluation node",
+            "correct_implementation": [
+              "builder.add_edge('ingest', 'evaluate_communication')",
+              "builder.add_edge('ingest', 'evaluate_technical')",
+              "builder.add_edge('ingest', 'evaluate_problem_solving')",
+              "builder.add_edge('ingest', 'evaluate_cultural')"
+            ],
+            "note": "Keep conditional edge only for error abort path using a separate validation check. LangGraph executes multiple outgoing edges from one node in parallel natively.",
+            "effort": "15-minute fix",
+            "impact": "Enables true parallel agent execution as designed in PRD"
+          },
+          {
+            "fix_id": "FIX-03",
+            "priority": 3,
+            "title": "Wire base_agent.py to Claude (Anthropic)",
+            "file": "agents/base_agent.py",
+            "change": "Replace AzureChatOpenAI with ChatAnthropic from langchain-anthropic. Update .env to use ANTHROPIC_API_KEY.",
+            "effort": "30-minute fix",
+            "impact": "Aligns codebase with confirmed PRD decision. Removes Azure dependency that was never agreed."
+          }
+        ],
+        "estimated_total_fix_time": "Under 2 hours for all three fixes",
+        "next_action_after_fixes": "Run submit_test.py with existing fixture and verify one complete end-to-end pipeline run produces a FeedbackReport without errors"
+      }
+    },
+
+    "stage_2_peer_review": {
+      "anonymised_mapping": {
+        "Response_A": "Advisor 3 — Expansionist",
+        "Response_B": "Advisor 1 — Contrarian",
+        "Response_C": "Advisor 5 — Executor",
+        "Response_D": "Advisor 4 — Outsider",
+        "Response_E": "Advisor 2 — First Principles"
+      },
+      "peer_review_questions": {
+        "strongest_response": {
+          "answer": "Response B (Contrarian)",
+          "reason": "The only response that went into the actual code and found specific, verifiable, breaking bugs with file names, line references, and technical explanations. Every other response operates at a conceptual or structural level. Response B identified five concrete, reproducible failures that a developer can act on directly without interpretation."
+        },
+        "biggest_blind_spot": {
+          "response": "Response A (Expansionist)",
+          "blind_spot": "Recommends longitudinal tracking and interviewer calibration dashboards when the InterviewState inherits from the wrong base class. Expansion thinking applied to a broken foundation produces a bigger broken system, not a better product. The system does not work yet — expansion is premature."
+        },
+        "what_all_five_missed": {
+          "title": "Prompt engineering quality — the PRD's highest-stated risk",
+          "description": "None of the five responses addressed the prompt engineering quality gap. The PRD explicitly stated 'vague rubrics produce confidently wrong feedback at scale' as the number one risk.",
+          "specific_gap": "The rubric JSON files exist and are well-structured, but none of the evaluation agent system prompts parse or reference the rubric dimensions by name in their output schema. The Technical Depth Agent injects the full rubric JSON into the prompt but asks the LLM to return a single EvalScore with one justification field.",
+          "consequence": "There is no per-dimension scoring, no structured breakdown of which rubric dimensions passed or failed. The granularity promised in the PRD — role-aware, dimension-specific evaluation — is not present in the actual LLM output schema.",
+          "prd_promise_violated": "The PRD specified role-aware evaluation where AI Engineer candidates are explicitly assessed against LangChain/RAG/quantization dimensions with separate scores. The current EvalScore model collapses all of this into score 1-5 and a 2-sentence justification."
+        }
+      }
+    },
+
+    "stage_3_chairman": {
+      "overall_verdict": "Architecturally well-conceived and structurally close to the PRD. The agent separation, DAG flow, Pydantic models, bias gate, and dashboard shape are all correct. Solid work for a first implementation pass. But it cannot be demoed or extended until three foundational bugs are fixed and one PRD promise is fulfilled.",
+      "prd_alignment_score": "70% — Structure correct, LLM provider wrong, parallel routing broken, evaluation granularity missing",
+      "single_most_important_reason": "The system was confirmed in the PRD and Grill Me to use Claude (Anthropic) as the LLM provider and to produce role-aware, rubric-driven structured output with dimension-level evaluation. Currently it uses Azure OpenAI with broken token tracking, and the evaluation output collapses all rubric dimensions into a single 1-5 score with no per-dimension breakdown. The core intelligence promise — that an AI Engineer is evaluated differently from a BA with explicit dimension-level justification — is not visible in the output.",
+      "one_concrete_next_step": "Fix the three executor items in order: TypedDict, parallel edges, Claude provider. Then run submit_test.py with the existing fixture. Get the pipeline to complete one full end-to-end run without errors. Once you have a green run with real output, address the prompt engineering gap (per-dimension scoring) because you will be able to see and iterate on actual LLM responses.",
+      "prioritised_action_list": [
+        "FIX-01: InterviewState TypedDict — 1 line, do immediately",
+        "FIX-02: Parallel edges via direct add_edge — 15 minutes",
+        "FIX-03: Switch base_agent to ChatAnthropic — 30 minutes",
+        "FIX-04: Fix IngestionAgent MCQ method call to use score_test_intake correctly",
+        "FIX-05: Fix Pydantic v2 constraint syntax (min_items → min_length)",
+        "FIX-06: Add transcript preprocessing — extract candidate-only speech turns before evaluation agents",
+        "FIX-07: Expand EvalScore or create DimensionScore model for per-rubric-dimension output",
+        "FIX-08: Add candidate list view to Streamlit dashboard",
+        "FIX-09: Add audio file upload endpoint and wire Whisper transcription service",
+        "FIX-10: Replace in-memory CANDIDATE_DB with SQLite persistence"
+      ]
+    },
+
+    "grill_me_prd_compliance_audit": {
+      "confirmed_decisions_status": [
+        {
+          "decision": "LLM Provider: Claude (Anthropic)",
+          "status": "VIOLATED",
+          "finding": "base_agent.py uses AzureChatOpenAI"
+        },
+        {
+          "decision": "Agent DAG: parallel evaluation branches",
+          "status": "BROKEN",
+          "finding": "Parallel routing via list return in conditional edge does not work in LangGraph"
+        },
+        {
+          "decision": "InterviewState as LangGraph state schema",
+          "status": "BROKEN",
+          "finding": "Inherits from dict instead of TypedDict"
+        },
+        {
+          "decision": "Role-aware rubric evaluation with dimension-level scoring",
+          "status": "PARTIALLY MET",
+          "finding": "Rubric JSON files exist and are loaded correctly. But EvalScore output collapses all dimensions into one score. No per-dimension output."
+        },
+        {
+          "decision": "Pydantic models at every agent boundary",
+          "status": "MET",
+          "finding": "All agents return typed Pydantic models. EvalScore, FeedbackReport, BiasLog all correctly defined."
+        },
+        {
+          "decision": "Bias Detection as mandatory gate before Compiler",
+          "status": "MET",
+          "finding": "PermissionError raised if bias_clear is False. Conditional edge routes to END if gate fails."
+        },
+        {
+          "decision": "Cultural Alignment Agent uses Session 2 ONLY",
+          "status": "MET",
+          "finding": "Agent explicitly receives only session2_transcript. System prompt enforces this."
+        },
+        {
+          "decision": "FastAPI with three endpoints: POST /candidates, GET /candidates/{id}/report, PATCH /candidates/{id}/decision",
+          "status": "MET",
+          "finding": "All three endpoints implemented correctly with proper status codes."
+        },
+        {
+          "decision": "Streamlit candidate dashboard",
+          "status": "PARTIALLY MET",
+          "finding": "Individual report view exists and is well-built. Candidate list table is missing — only single-ID lookup available."
+        },
+        {
+          "decision": "Token usage tracking per agent call with 80k token alert",
+          "status": "BROKEN",
+          "finding": "Token metadata extraction is broken — always logs zero due to structured output response format mismatch."
+        },
+        {
+          "decision": "No Docker",
+          "status": "MET",
+          "finding": "No Docker configuration present."
+        },
+        {
+          "decision": "No test files",
+          "status": "MET",
+          "finding": "No test files present."
+        },
+        {
+          "decision": "Whisper transcription pipeline",
+          "status": "NOT STARTED",
+          "finding": "services/transcription.py does not exist. No audio upload endpoint."
+        },
+        {
+          "decision": "SQLite locally, AWS RDS in production",
+          "status": "NOT MET",
+          "finding": "In-memory dictionary used. No database persistence at all."
+        }
+      ]
+    }
+  }
+}
