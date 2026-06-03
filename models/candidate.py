@@ -8,7 +8,7 @@ class CandidateBundle(BaseModel):
     candidate_name: str
     role_type: RoleType
     mcq_score: float
-    programming_answers: List[str] = Field(..., min_items=2, max_items=2)
+    programming_answers: List[str] = Field(..., min_length=2, max_length=2)
     session1_transcript: str
     session2_transcript: str
 

@@ -24,8 +24,8 @@ class FeedbackReport(BaseModel):
     cultural_alignment: EvalScore
     
     # Synthesis Blocks
-    strengths: List[str] = Field(..., min_items=2, max_items=3, description="2 to 3 distinct bullet points highlighting strengths")
-    concerns: List[str] = Field(..., min_items=2, max_items=3, description="2 to 3 distinct bullet points highlighting risks or gaps")
+    strengths: List[str] = Field(..., min_length=2, max_length=3, description="2 to 3 distinct bullet points highlighting strengths")
+    concerns: List[str] = Field(..., min_length=2, max_length=3, description="2 to 3 distinct bullet points highlighting risks or gaps")    
     
     # Final Flags
     ai_recommendation: Recommendation
