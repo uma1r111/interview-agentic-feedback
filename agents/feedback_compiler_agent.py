@@ -1,16 +1,16 @@
 import logging
 from typing import Dict, Any, Tuple, List
 from agents.base_agent import BaseAgent
-from models.evaluation import EvalScore, FeedbackReport
+from models.evaluation import EvalScore, TechnicalDimensionReport, FeedbackReport
 from models.enums import RoleType, Recommendation, Decision
 
-# Setup robust system logger tracking channel
 logger = logging.getLogger("FeedbackCompilerAgent")
 
 class FeedbackCompilerAgent(BaseAgent):
     """
-    Final pipeline synthesis engine. Compiles dimensional evaluations and programmatic scores 
+    Final pipeline synthesis engine. Compiles dimensional evaluations and programmatic scores
     into a unified executive summary, strictly enforcing the bias governance lock.
+    Now handles full TechnicalDimensionReport with per-dimension breakdown.
     """
     def __init__(self):
         super().__init__()
@@ -23,7 +23,7 @@ class FeedbackCompilerAgent(BaseAgent):
         mcq_score: float,
         programming_answers: List[str],
         communication: EvalScore,
-        technical: EvalScore,
+        technical: TechnicalDimensionReport,        # CHANGED from EvalScore
         problem_solving: EvalScore,
         cultural: EvalScore,
         bias_clear: bool
@@ -31,7 +31,7 @@ class FeedbackCompilerAgent(BaseAgent):
         """
         Synthesizes individual agent scores and text justifications into a consolidated,
         strongly typed FeedbackReport object.
-        
+
         Returns:
             Tuple[FeedbackReport, token_metadata]
         """
@@ -45,6 +45,19 @@ class FeedbackCompilerAgent(BaseAgent):
 
         logger.info(f"Compiling consolidated role-aware evaluation report for candidate: {candidate_name}")
 
+        # Serialize TechnicalDimensionReport into a readable block for the compiler prompt
+        technical_block = (
+            f"Overall Technical Score: {technical.overall_score}/5\n"
+            f"Overall Justification: {technical.overall_justification}\n"
+            f"Dimension Breakdown:\n"
+        )
+        for dim in technical.dimensions:
+            technical_block += (
+                f"  - {dim.dimension_name}: {dim.score}/5 — {dim.justification}"
+                + (f" (Evidence: {dim.evidence})" if dim.evidence else "")
+                + "\n"
+            )
+
         system_prompt = (
             "You are an executive hiring board director and chief technical assessment officer.\n"
             "Your objective is to ingest individual dimension scores and transform them into a polished, "
@@ -52,29 +65,32 @@ class FeedbackCompilerAgent(BaseAgent):
             "Compilation Guidelines:\n"
             "1. Score Mapping: Map the incoming communication, technical depth, problem-solving, and cultural-alignment "
             "objects directly to their respective report tracks.\n"
-            "2. Coding Question Extrapolations: Infer two standalone integer scores strictly between 1 and 5 specifically "
+            "2. Technical Depth Mapping: The technical_depth field must be populated as a full TechnicalDimensionReport. "
+            "Use the provided overall score, overall justification, and dimension breakdown exactly as given — "
+            "do not modify or re-evaluate them. Carry them through verbatim into the report.\n"
+            "3. Coding Question Extrapolations: Infer two standalone integer scores strictly between 1 and 5 specifically "
             "for 'programming_q1_score' and 'programming_q2_score' based entirely on the Technical Agent's analysis "
             "and the provided raw code text answers.\n"
-            "3. Strengths & Concerns Syntheses: Generate exactly 2 to 3 distinct, actionable bullet points for strengths "
-            "and exactly 2 to 3 for concerns. Ensure they summarize technical data points, architectural concepts, or "
-            "behavioral maturity indicators mentioned in the texts.\n"
-            "4. Dynamic Recommendation: Formulate a final holistic 'ai_recommendation' enum value ('Strong Yes', 'Yes', 'Maybe', 'No') "
-            "and a single-sentence 'ai_justification'. Take the target track into consideration (e.g., if it is a Trainee position, "
-            "we value high learning agility and strong fundamental problem-solving frameworks over 10+ years of deep architecture exposure).\n\n"
-            "Enforce strict conformity with this exact structured payload schema configuration response:\n"
+            "4. Strengths & Concerns Syntheses: Generate exactly 2 to 3 distinct, actionable bullet points for strengths "
+            "and exactly 2 to 3 for concerns. Draw from technical dimension scores, communication quality, "
+            "problem solving indicators, and cultural alignment signals.\n"
+            "5. Dynamic Recommendation: Formulate a final holistic 'ai_recommendation' enum value ('Strong Yes', 'Yes', 'Maybe', 'No') "
+            "and a single-sentence 'ai_justification'. Factor in all dimensions — a candidate with high overall scores "
+            "but weak dimension-level gaps (e.g. low hallucination_handling for an AI role) should be weighted accordingly.\n\n"
+            "Enforce strict conformity with this exact structured payload schema:\n"
             "- candidate_name: Full name of candidate\n"
             "- role_applied: String representation of the target career track\n"
             "- mcq_score: Float tracking programmatic score out of 5\n"
-            "- programming_q1_score: Integer from 1 to 5 mapping question 1 code correctness/efficiency\n"
-            "- programming_q2_score: Integer from 1 to 5 mapping question 2 code correctness/efficiency\n"
-            "- communication: Complete structural EvalScore object\n"
-            "- technical_depth: Complete structural EvalScore object\n"
-            "- problem_solving: Complete structural EvalScore object\n"
-            "- cultural_alignment: Complete structural EvalScore object\n"
-            "- strengths: List of 2 to 3 string bullet strings\n"
-            "- concerns: List of 2 to 3 string bullet strings\n"
-            "- ai_recommendation: Recommendation Enum token matching target decision metrics\n"
-            "- ai_justification: Exactly a single-sentence executive reasoning narrative summary\n"
+            "- programming_q1_score: Integer from 1 to 5\n"
+            "- programming_q2_score: Integer from 1 to 5\n"
+            "- communication: Complete EvalScore object\n"
+            "- technical_depth: Complete TechnicalDimensionReport object with overall_score, overall_justification, and dimensions list\n"
+            "- problem_solving: Complete EvalScore object\n"
+            "- cultural_alignment: Complete EvalScore object\n"
+            "- strengths: List of 2 to 3 string bullets\n"
+            "- concerns: List of 2 to 3 string bullets\n"
+            "- ai_recommendation: One of 'Strong Yes', 'Yes', 'Maybe', 'No'\n"
+            "- ai_justification: Single-sentence executive reasoning\n"
             "- hiring_manager_decision: Default to 'Hold'"
         )
 
@@ -87,24 +103,23 @@ class FeedbackCompilerAgent(BaseAgent):
             f"Q2 Code: {programming_answers[1]}\n"
             f"--- END CODE INPUTS ---\n\n"
             f"--- START AGENT METRIC FEEDS ---\n"
-            f"[Communication Evaluator]: Score={communication.score} | Justification={communication.justification}\n"
-            f"[Technical Depth Evaluator]: Score={technical.score} | Justification={technical.justification}\n"
-            f"[Problem Solving Evaluator]: Score={problem_solving.score} | Justification={problem_solving.justification}\n"
+            f"[Communication Evaluator]: Score={communication.score} | Justification={communication.justification}\n\n"
+            f"[Technical Depth Evaluator]:\n{technical_block}\n"
+            f"[Problem Solving Evaluator]: Score={problem_solving.score} | Justification={problem_solving.justification}\n\n"
             f"[Cultural Alignment Evaluator]: Score={cultural.score} | Justification={cultural.justification}\n"
             f"--- END AGENT METRIC FEEDS ---"
         )
 
-        # 2. Invoke structured model compilation transaction via our Azure OpenAI wrapper
+        # 2. Invoke structured model compilation
         compiled_report, token_meta = self.call_llm_structured(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=FeedbackReport
         )
 
-        # 3. Defensive Processing Post-Invocation Guardrail
+        # 3. Defensive fallback
         if not compiled_report:
             logger.error("Generative layout compilation error tracking block encountered.")
-            # Build a completely structural fallback report matching Pydantic fields exactly
             compiled_report = FeedbackReport(
                 candidate_name=candidate_name,
                 role_applied=role_type.value,

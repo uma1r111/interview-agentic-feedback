@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, TypedDict
 from models.enums import RoleType
-from models.evaluation import EvalScore, FeedbackReport
+from models.evaluation import EvalScore, FeedbackReport, TechnicalDimensionReport
 from models.bias import BiasLog
 
 class CandidateBundle(BaseModel):
@@ -22,7 +22,7 @@ class InterviewState(TypedDict, total=False):
     session2_transcript: str
     mcq_responses: Optional[Dict[str, str]]
     communication_score: Optional[EvalScore]
-    technical_score: Optional[EvalScore]
+    technical_score: Optional[TechnicalDimensionReport]      # CHANGED from Optional[EvalScore]
     problem_solving_score: Optional[EvalScore]
     cultural_score: Optional[EvalScore]
     bias_log: Optional[BiasLog]

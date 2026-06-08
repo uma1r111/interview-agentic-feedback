@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Dict, Any, Tuple
 from agents.base_agent import BaseAgent
-from models.evaluation import EvalScore
+from models.evaluation import TechnicalDimensionReport
 from models.enums import RoleType
 
 # Setup robust system logger tracking channel
@@ -13,6 +13,7 @@ class TechnicalDepthAgent(BaseAgent):
     """
     Role-aware evaluation engine responsible for dynamically synthesizing custom tracking
     rubrics, isolating code blocks, and grading deep backend and systems engineering logic.
+    Now produces a full TechnicalDimensionReport with per-rubric-dimension scoring.
     """
     def __init__(self):
         super().__init__()
@@ -24,11 +25,9 @@ class TechnicalDepthAgent(BaseAgent):
         Features polymorphic inheritance resolution to cleanly merge base SWE characteristics 
         if an 'extends' directive is encountered inside a target track.
         """
-        # Convert enum or string to a standardized string format
         role_str = role_type.value if hasattr(role_type, 'value') else str(role_type)
         role_str = role_str.strip().upper()
 
-        # Map the shorthand API token to the exact structural filename on disk
         if role_str == "AI":
             filename = "ai_engineer.json"
         elif role_str == "SWE":
@@ -41,26 +40,24 @@ class TechnicalDepthAgent(BaseAgent):
             filename = f"{role_str.lower()}.json"
 
         rubric_path = os.path.join("rubrics", filename)
-        
+
         try:
             if not os.path.exists(rubric_path):
                 raise FileNotFoundError(f"Target metric dictionary not found at location: {rubric_path}")
 
             with open(rubric_path, "r", encoding="utf-8") as file:
                 rubric_data = json.load(file)
-            
-            # Polymorphic Check: Does this specialization inherit from a baseline track?
+
             if "extends" in rubric_data and rubric_data["extends"] == "SWE":
                 logger.info(f"Rubric expansion detected. Merging base SWE metrics into specialization: {role_str}")
                 swe_path = os.path.join("rubrics", "swe.json")
-                
+
                 with open(swe_path, "r", encoding="utf-8") as swe_file:
                     swe_base = json.load(swe_file)
-                
-                # Deep-merge the dimensions safely to avoid mutation side-effects
+
                 compiled_dimensions = {**swe_base.get("dimensions", {}), **rubric_data.get("dimensions", {})}
                 rubric_data["dimensions"] = compiled_dimensions
-                
+
             logger.info(f"Successfully loaded and compiled technical rubric mapping for track: {role_str}")
             return rubric_data
 
@@ -74,43 +71,55 @@ class TechnicalDepthAgent(BaseAgent):
                 return {"role_type": "FALLBACK", "dimensions": {"technical_depth": "Evaluate structural logic baseline."}}
 
     def evaluate_technical_depth(
-        self, 
-        role_type: Any, 
-        session1_transcript: str, 
+        self,
+        role_type: Any,
+        session1_transcript: str,
         programming_answers: list[str]
-    ) -> Tuple[EvalScore, Dict[str, int]]:
+    ) -> Tuple[TechnicalDimensionReport, Dict[str, int]]:
         """
         Analyzes specialized engineering capabilities using custom compiled rubric files.
-        Evaluates candidate's coding architecture separate from conversational jargon context.
-        
+        Returns a full TechnicalDimensionReport with overall score and per-dimension breakdown.
+
         Returns:
-            Tuple[EvalScore, token_metadata]
+            Tuple[TechnicalDimensionReport, token_metadata]
         """
-        # Defensive Data Shield Boundary Check
         if not programming_answers or len(programming_answers) < 2:
             logger.error("Programming submissions trace arrays are missing or malformed. Filling failure parameters.")
             programming_answers = ["# Missing Submission Text File", "# Missing Submission Text File"]
 
-        # 1. Fetch and structurally resolve the dynamic rubric architecture tree map
         compiled_rubric = self._load_and_compile_rubric(role_type)
-        
+        dimensions = compiled_rubric.get("dimensions", {})
+
         logger.info(f"Executing analytical technical depth evaluation for role payload tracker: {role_type}")
+
+        # Build explicit dimension instructions so the LLM knows exactly what to produce
+        dimension_instructions = "\n".join([
+            f"- {dim_name}: {dim_definition}"
+            for dim_name, dim_definition in dimensions.items()
+        ])
 
         system_prompt = (
             "You are an elite Principal Systems Architect and Lead Machine Learning Engineer.\n"
-            "Your mandate is to strictly evaluate the candidate's core domain competence, structural algorithmic "
-            "implementations, and low-level system design tradeoffs.\n\n"
-            f"CRITICAL ASSIGNMENT: You must explicitly grade the applicant against these exact dimensions and definitions:\n"
-            f"{json.dumps(compiled_rubric, indent=2)}\n\n"
-            "Execution Audit Data Rules:\n"
-            "1. Core Systems & Projects: Cross-verify any listed architectural experiences "
-            "against their conversational logic. Detect depth vs script copying.\n"
-            "2. Programming Artifact Analysis: Grade code execution logic, memory optimization, and time complexity parameters "
-            "separately from syntax spacing mistakes.\n\n"
-            "Enforce strict conformity with this exact structured payload schema configuration response:\n"
-            "- score: Integer value between 1 (Critical structural gaps) and 5 (Flawless architectural understanding).\n"
-            "- justification: Exactly a crisp, 2-sentence rationale outlining the core reasons for the score.\n"
-            "- evidence: Extract direct verbatim quotes or code variables from the raw candidate data streams below."
+            "Your mandate is to strictly evaluate the candidate's core domain competence against "
+            "a specific set of rubric dimensions. You must score EVERY dimension individually.\n\n"
+            f"RUBRIC DIMENSIONS TO EVALUATE (score each one separately):\n"
+            f"{dimension_instructions}\n\n"
+            "Evaluation Rules:\n"
+            "1. Score every single dimension listed above — do not skip any.\n"
+            "2. For each dimension provide: a score (1-5), a single-sentence justification, "
+            "and a direct verbatim evidence quote from the transcript or code where available.\n"
+            "3. After scoring all dimensions, provide an overall_score (1-5) as a holistic "
+            "summary and an overall_justification (exactly 2 sentences).\n"
+            "4. Base all scores strictly on the provided transcript and code — do not infer "
+            "or assume capabilities not explicitly demonstrated.\n\n"
+            "You must return a structured response matching this exact schema:\n"
+            "- overall_score: Integer 1-5 holistic score across all dimensions\n"
+            "- overall_justification: Exactly 2 sentences summarizing the technical assessment\n"
+            "- dimensions: A list of objects, one per rubric dimension, each containing:\n"
+            "  * dimension_name: The exact dimension key (e.g. 'langgraph_familiarity')\n"
+            "  * score: Integer 1-5\n"
+            "  * justification: Single sentence rationale\n"
+            "  * evidence: Direct verbatim quote from transcript or code, or null if not demonstrable"
         )
 
         user_prompt = (
@@ -123,20 +132,29 @@ class TechnicalDepthAgent(BaseAgent):
             f"--- END CONVERSATIONAL TECHNICAL PANEL DIALOGUE BLOCK ---"
         )
 
-        # 2. Invoke structured model validation routine via our local Azure OpenAI wrapper
         eval_output, token_meta = self.call_llm_structured(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=EvalScore
+            response_model=TechnicalDimensionReport
         )
 
-        # 3. Defensive Processing Post-Invocation Guardrail
         if not eval_output:
             logger.error("Generative payload transaction error trace encountered during runtime assessment loop.")
-            eval_output = EvalScore(
-                score=1,
-                justification="Technical depth evaluation workflow was forced into baseline mitigation due to generation structural failures.",
-                evidence="N/A"
+            # Build fallback with one dimension per rubric entry so schema is still valid
+            fallback_dimensions = [
+                {
+                    "dimension_name": dim_name,
+                    "score": 1,
+                    "justification": "Evaluation failed — requires manual review.",
+                    "evidence": None
+                }
+                for dim_name in dimensions.keys()
+            ] or [{"dimension_name": "technical_depth", "score": 1, "justification": "Evaluation failed.", "evidence": None}]
+
+            eval_output = TechnicalDimensionReport(
+                overall_score=1,
+                overall_justification="Technical depth evaluation was forced into baseline mitigation due to generation runtime failures. All dimension scores require manual auditing.",
+                dimensions=fallback_dimensions
             )
 
         return eval_output, token_meta

@@ -96,18 +96,18 @@ def bias_detection_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Subjective language sweep over all dimensional observations."""
     logger.info("--- START NODE: BIAS DETECTION GUARDRAIL GATE ---")
     agent = BiasDetectionAgent()
-    log, sanitized_scores, clear_flag, _ = agent.analyze_and_sanitize_scores(
-        communication=state.get("communication_score"),
-        technical=state.get("technical_score"),
-        problem_solving=state.get("problem_solving_score"),
-        cultural=state.get("cultural_score")
+    log, clean_comm, clean_tech, clean_prob, clean_cult, clear_flag, _ = agent.analyze_and_sanitize_scores(
+    communication=state.get("communication_score"),
+    technical=state.get("technical_score"),
+    problem_solving=state.get("problem_solving_score"),
+    cultural=state.get("cultural_score")
     )
     return {
         "bias_log": log,
-        "communication_score": sanitized_scores[0],
-        "technical_score": sanitized_scores[1],
-        "problem_solving_score": sanitized_scores[2],
-        "cultural_score": sanitized_scores[3],
+        "communication_score": clean_comm,
+        "technical_score": clean_tech,
+        "problem_solving_score": clean_prob,
+        "cultural_score": clean_cult,
         "bias_clear": clear_flag
     }
 
