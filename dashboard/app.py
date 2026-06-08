@@ -98,20 +98,17 @@ if fetch_btn and candidate_id_input.strip() != "":
                 st.info(f"**Overall Justification:** {report['technical_depth']['overall_justification']}")
                 st.markdown("#### 📐 Dimension Breakdown")
                 for dim in report['technical_depth']['dimensions']:
-                    score = dim['score']
-                    # Color code by score
-                    if score >= 4:
-                        indicator = "🟢"
-                    elif score == 3:
-                        indicator = "🟡"
+                    if dim.get('not_assessed'):
+                        st.markdown(f"**⚪ {dim['dimension_name'].replace('_', ' ').title()}** — Not Assessed")
+                        st.caption(f"{dim['justification']}")
                     else:
-                        indicator = "🔴"
-                    with st.container():
+                        score = dim['score']
+                        indicator = "🟢" if score >= 4 else "🟡" if score == 3 else "🔴"
                         st.markdown(f"**{indicator} {dim['dimension_name'].replace('_', ' ').title()}** — {score}/5")
                         st.caption(f"{dim['justification']}")
                         if dim.get('evidence'):
                             st.caption(f"*Evidence: \"{dim['evidence']}\"*")
-                
+                            
             with st.expander(f"🤝 Cultural Alignment Metrics - Score: {report['cultural_alignment']['score']}/5", expanded=True):
                 st.info(f"**Justification:** {report['cultural_alignment']['justification']}")
                 st.caption(f"**Transcript Evidence:** *\"{report['cultural_alignment']['evidence']}\"*")
