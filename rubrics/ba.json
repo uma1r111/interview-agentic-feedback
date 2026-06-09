@@ -1,5 +1,15 @@
 {
   "role_type": "BA",
+  "required_skills": [
+    "SQL",
+    "Excel",
+    "Power BI",
+    "Requirements Gathering",
+    "Stakeholder Management",
+    "Process Mapping",
+    "Data Analysis"
+  ],
+  "min_experience_years": 1,
   "dimensions": {
     "requirements_gathering": "Evaluates user story decomposition, business scope discovery, and process engineering mapping.",
     "stakeholder_communication": "Evaluates clarity of delivery, conflict resolution framing, and translation of technical requirements to business values.",
@@ -8,4 +18,4 @@
     "excel": "Evaluates advanced model forecasting, macro processing, array lookups, and pivot data summaries.",
     "power_bi": "Evaluates semantic model design, DAX calculated metric formulas, and interactive canvas layout usability."
   }
-}
+}

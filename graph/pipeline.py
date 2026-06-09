@@ -11,6 +11,7 @@ from agents.problem_solving_agent import ProblemSolvingAgent
 from agents.cultural_alignment_agent import CulturalAlignmentAgent
 from agents.bias_detection_agent import BiasDetectionAgent
 from agents.feedback_compiler_agent import FeedbackCompilerAgent
+from agents.cv_parsing_agent import CVParsingAgent
 
 logger = logging.getLogger("InterviewPipeline")
 
@@ -31,11 +32,17 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         raw_payload = {
             "candidate_name": state.get("candidate_name"),
             "role_type": state.get("role_type"),
+            "raw_cv": state.get("raw_cv"),
             "mcq_score": state.get("mcq_score"),
             "programming_answers": state.get("programming_answers"),
             "session1_transcript": state.get("session1_transcript"),
             "session2_transcript": state.get("session2_transcript")
         }
+
+    # Defensive patch: if raw_payload arrived from model_dump() but raw_cv
+    # wasn't included (e.g. server cached an old schema), pull it from flat state.
+    if "raw_cv" not in raw_payload and state.get("raw_cv"):
+        raw_payload["raw_cv"] = state.get("raw_cv")
 
     agent = IngestionAgent()
     updated_state, success = agent.process_intake(raw_payload, mcq_responses)
@@ -51,6 +58,7 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "candidate_id": updated_state.get("candidate_id"),
         "candidate_name": updated_state.get("candidate_name"),
         "role_type": updated_state.get("role_type"),
+        "raw_cv": updated_state.get("raw_cv"),
         "mcq_score": updated_state.get("mcq_score"),
         "programming_answers": updated_state.get("programming_answers"),
         "session1_transcript": updated_state.get("session1_transcript"),
@@ -111,10 +119,54 @@ def bias_detection_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "bias_clear": clear_flag
     }
 
+def cv_parsing_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Runs the two-pass CV Parsing Agent.
+
+    WHAT THIS NODE DOES IN THE GRAPH
+    ----------------------------------
+    This node runs IN PARALLEL with the 4 evaluation nodes (fan-out from ingest).
+    It reads raw_cv from state, calls CVParsingAgent.parse(), and writes two
+    new keys into the state:
+      - candidate_skills_summary  →  the anonymised CV (CandidateSkillsSummary)
+      - cv_experience_match       →  the rubric comparison (ExperienceMatchSummary)
+
+    WHY IT DOESN'T WRITE TO bias_log OR bias_clear
+    ------------------------------------------------
+    The CV Parsing Agent does NOT run through the bias gate. Its output
+    (CandidateSkillsSummary) is already PII-free by design. The Bias Detection
+    Agent only scans evaluation agent text (justifications and evidence quotes).
+    """
+    logger.info("--- START NODE: CV PARSING AGENT ---")
+
+    raw_cv = state.get("raw_cv", "")
+    role_type = state.get("role_type")
+
+    if not raw_cv:
+        logger.warning("cv_parsing_node: raw_cv is empty — skipping CV parsing.")
+        return {
+            "candidate_skills_summary": None,
+            "cv_experience_match": None
+        }
+
+    agent = CVParsingAgent()
+    skills_summary, experience_match = agent.parse(
+        raw_cv=raw_cv,
+        role_type=role_type
+    )
+
+    return {
+        "candidate_skills_summary": skills_summary,  # CandidateSkillsSummary
+        "cv_experience_match": experience_match       # ExperienceMatchSummary
+    }
+
 def feedback_compiler_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Synthesizes all individual dimension evaluations into an executive summary."""
     logger.info("--- START NODE: FEEDBACK COMPILER ---")
     agent = FeedbackCompilerAgent()
+    
+    cv_match = state.get("cv_experience_match")
+    
     report, _ = agent.compile_final_report(
         candidate_name=state.get("candidate_name", ""),
         role_type=state.get("role_type"),
@@ -124,9 +176,17 @@ def feedback_compiler_node(state: Dict[str, Any]) -> Dict[str, Any]:
         technical=state.get("technical_score"),
         problem_solving=state.get("problem_solving_score"),
         cultural=state.get("cultural_score"),
-        bias_clear=state.get("bias_clear", False)
+        bias_clear=state.get("bias_clear", False),
+        cv_experience_match=cv_match
     )
+
+    # Attach cv_experience_match directly to the report object for database persistence and UI.
+    if cv_match and report:
+        report.cv_experience_match = cv_match
+        logger.info("CV experience match attached to FeedbackReport.")
+
     return {"feedback_report": report}
+
 
 # ==============================================================================
 # LangGraph Conditional Edge Routing Criteria
@@ -145,7 +205,16 @@ def route_after_ingestion(state: Dict[str, Any]) -> Literal["abort_pipeline", "c
     if state.get("error"):
         logger.error("Ingestion validation failure. Blocking downstream agents.")
         return "abort_pipeline"
-    return "continue"   
+    
+    # LangGraph conditional router functions can return an array of keys 
+    # indicating multiple downstream vertices should be triggered concurrently!
+    return [
+        "evaluate_communication",
+        "evaluate_technical",
+        "evaluate_problem_solving",
+        "evaluate_cultural",
+        "parse_cv"       # ← CV Parsing Agent runs in parallel with the 4 evaluators
+    ]
 
 # ==============================================================================
 # Pipeline Topology Assembler Builder
@@ -157,14 +226,14 @@ def create_interview_graph():
     builder = StateGraph(InterviewState)
     
     # 2. Register functional execution processing vertices
-    builder.add_node("ingest", ingestion_node)
-    builder.add_node("evaluate_communication", communication_node)
-    builder.add_node("evaluate_technical", technical_depth_node)
-    builder.add_node("evaluate_problem_solving", problem_solving_node)
-    builder.add_node("evaluate_cultural", cultural_alignment_node)
-    builder.add_node("verify_bias_gate", bias_detection_node)
-    builder.add_node("compile_report", feedback_compiler_node)
-
+    builder.add_node("ingest",                    ingestion_node)
+    builder.add_node("evaluate_communication",    communication_node)
+    builder.add_node("evaluate_technical",        technical_depth_node)
+    builder.add_node("evaluate_problem_solving",  problem_solving_node)
+    builder.add_node("evaluate_cultural",         cultural_alignment_node)
+    builder.add_node("parse_cv",                  cv_parsing_node)   # ← new node
+    builder.add_node("verify_bias_gate",          bias_detection_node)
+    builder.add_node("compile_report",            feedback_compiler_node)
     # 3. Establish flow boundaries
     builder.add_edge(START, "ingest")
     
@@ -176,22 +245,24 @@ def create_interview_graph():
         "ingest",
         route_after_ingestion,
         {
-            "abort_pipeline": END,
-            "continue": "evaluate_communication"
+            "evaluate_communication":   "evaluate_communication",
+            "evaluate_technical":       "evaluate_technical",
+            "evaluate_problem_solving": "evaluate_problem_solving",
+            "evaluate_cultural":        "evaluate_cultural",
+            "parse_cv":                 "parse_cv",   # ← added to allow-list
+            "abort_pipeline":           END
         }
     )
-
-    # Parallel fan-out — LangGraph executes all four concurrently
-    builder.add_edge("ingest", "evaluate_technical")
-    builder.add_edge("ingest", "evaluate_problem_solving")
-    builder.add_edge("ingest", "evaluate_cultural")
-
-    # Fan-in — wait for ALL four parallel branches before bias gate
-    builder.add_edge(
-        ["evaluate_communication", "evaluate_technical", "evaluate_problem_solving", "evaluate_cultural"],
-        "verify_bias_gate"
-    )
-
+    
+    # Parallel Branch Fan-In:
+    # All 5 parallel nodes (4 evaluators + CV parser) must complete before
+    # verify_bias_gate fires. LangGraph counts incoming edges automatically —
+    # adding this 5th edge extends the synchronization barrier from 4 to 5.
+    builder.add_edge("evaluate_communication",   "verify_bias_gate")
+    builder.add_edge("evaluate_technical",       "verify_bias_gate")
+    builder.add_edge("evaluate_problem_solving", "verify_bias_gate")
+    builder.add_edge("evaluate_cultural",        "verify_bias_gate")
+    builder.add_edge("parse_cv",                 "verify_bias_gate")  # ← new fan-in edge
     # 4. Integrate strict conditional gating constraints after the bias check
     builder.add_conditional_edges(
         "verify_bias_gate",

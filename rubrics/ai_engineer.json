@@ -1,6 +1,18 @@
 {
   "role_type": "AI",
   "extends": "SWE",
+  "required_skills": [
+    "Python",
+    "LangChain",
+    "LangGraph",
+    "Prompt Engineering",
+    "RAG",
+    "Vector Databases",
+    "Machine Learning",
+    "MLOps",
+    "Azure OpenAI"
+  ],
+  "min_experience_years": 2,
   "dimensions": {
     "algorithms": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
     "system_design": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",

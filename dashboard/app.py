@@ -17,6 +17,7 @@ st.markdown("---")
 # Helper API Fetch Utilities
 # ==============================================================================
 def fetch_all_candidates():
+    """Fetches the list of all candidates from the backend SQLite database."""
     try:
         response = requests.get(f"{API_BASE_URL}/candidates", timeout=3)
         if response.status_code == 200:
@@ -26,8 +27,9 @@ def fetch_all_candidates():
     return []
 
 def fetch_report(candidate_id: str):
+    """Retrieves a candidate's consolidated FeedbackReport from the backend server."""
     try:
-        response = requests.get(f"{API_BASE_URL}/candidates/{candidate_id}/report")
+        response = requests.get(f"{API_BASE_URL}/candidates/{candidate_id}/report", timeout=5)
         if response.status_code == 200:
             return response.json()
         elif response.status_code == 404:
@@ -41,10 +43,12 @@ def fetch_report(candidate_id: str):
     return None
 
 def submit_decision(candidate_id: str, decision: str):
+    """Submits the hiring manager's final decision selection for a candidate back to the database."""
     try:
         response = requests.patch(
             f"{API_BASE_URL}/candidates/{candidate_id}/decision",
-            json={"decision": decision}
+            json={"decision": decision},
+            timeout=3
         )
         if response.status_code == 200:
             st.success(f"✅ Status updated! Candidate locked to: '{decision}'")
@@ -144,6 +148,49 @@ if candidate_id_to_load:
 
         st.markdown("---")
 
+        # Row 2: CV Experience Match — only shown if cv_experience_match is present in report
+        cv_match = report.get("cv_experience_match")
+        if cv_match:
+            st.markdown("### 📄 CV Experience Match")
+            st.caption("Extracted from the candidate's uploaded CV — informational only, does not affect dimension scores.")
+
+            # Top metrics row
+            cv_col1, cv_col2, cv_col3 = st.columns(3)
+            with cv_col1:
+                st.metric(
+                    label="Years of Experience",
+                    value=cv_match["years_of_experience"],
+                    delta=f"Role requires {cv_match['role_min_experience']}",
+                    delta_color="off"
+                )
+            with cv_col2:
+                domain_emoji = {"strong": "🟢", "moderate": "🟡", "weak": "🔴"}.get(cv_match["domain_match"], "⚪")
+                st.metric(label="Domain Match", value=f"{domain_emoji} {cv_match['domain_match'].capitalize()}")
+            with cv_col3:
+                rating_emoji = {"strong": "🟢", "moderate": "🟡", "weak": "🔴"}.get(cv_match["overall_match_rating"], "⚪")
+                st.metric(label="Overall CV Rating", value=f"{rating_emoji} {cv_match['overall_match_rating'].capitalize()}")
+
+            # Skills present vs missing
+            skills_col1, skills_col2 = st.columns(2)
+            with skills_col1:
+                st.success("#### ✅ Required Skills Present")
+                present = cv_match.get("required_skills_present", [])
+                if present:
+                    for skill in present:
+                        st.markdown(f"* {skill}")
+                else:
+                    st.markdown("*None of the required skills were found in the CV.*")
+
+            with skills_col2:
+                st.error("#### ❌ Required Skills Missing")
+                missing = cv_match.get("required_skills_missing", [])
+                if missing:
+                    for skill in missing:
+                        st.markdown(f"* {skill}")
+                else:
+                    st.markdown("*All required skills are present — no gaps detected.*")
+
+            st.markdown("---")
         st.markdown("### 🎛️ Multi-Agent Dimensional Analysis Breakdown")
         dim_col1, dim_col2 = st.columns(2)
 
