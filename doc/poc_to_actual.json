@@ -1,0 +1,243 @@
+{
+  "project": "AI Interview Feedback System",
+  "audit_type": "Production Readiness Assessment",
+  "context": "Transitioning from POC to internal company tool for real candidate evaluation",
+  "total_issues": 18,
+
+  "priority_tiers": {
+
+    "P0_BLOCKING": {
+      "description": "Must be fixed before any real candidate is evaluated. These will cause data loss, wrong decisions, or compliance violations on first real use.",
+      "issues": [
+        {
+          "issue_id": "P0-01",
+          "title": "Candidate ID collision — same name overwrites previous record",
+          "file": "agents/ingestion_agent.py",
+          "description": "candidate_id is generated as cand_{name.lower().replace(' ', '_')}. Two candidates named 'Ali Khan' produce identical IDs. The second submission silently overwrites the first via INSERT OR REPLACE. Evaluation data is permanently lost with no warning.",
+          "consequence": "Silent data loss in production. Unhireable for a real HR tool.",
+          "fix": "Append a UUID suffix or timestamp to candidate_id. Format: cand_{name_slug}_{uuid4()[:8]}",
+          "effort": "15 minutes"
+        },
+        {
+          "issue_id": "P0-02",
+          "title": "Answer key registry only covers AI role — all other roles silently scored wrong",
+          "file": "services/test_processor.py",
+          "description": "answer_key_registry only has 'AI' as a key. Submitting a SWE, BA, or Trainee candidate triggers a warning log and falls back to the AI answer key — scoring them against entirely wrong questions. No error is raised.",
+          "consequence": "Every non-AI candidate receives a meaningless MCQ score that poisons the FeedbackReport and AI recommendation.",
+          "fix": "Add placeholder answer keys for SWE, BA, and Trainee in the registry. Even empty dicts with a log notice are safer than silent wrong scoring.",
+          "effort": "30 minutes"
+        },
+        {
+          "issue_id": "P0-03",
+          "title": "No access control — any network user can submit candidates, read all reports, and change hiring decisions",
+          "file": "api/main.py",
+          "description": "All three API endpoints are completely open. No authentication, no authorization, no role separation. Any person who can reach port 8000 can read every candidate report, overwrite hiring decisions, and inject fake candidates.",
+          "consequence": "Direct HR compliance violation. Candidate PII and hiring decisions exposed to anyone on the network.",
+          "fix": "Add API key authentication as minimum viable protection. Ideally add role separation: submitter vs hiring manager vs admin.",
+          "effort": "2-3 hours for basic API key auth"
+        },
+        {
+          "issue_id": "P0-04",
+          "title": "Hiring decision audit trail missing — no record of who changed what and when",
+          "file": "api/main.py",
+          "description": "The PATCH endpoint updates hiring_decision column but records no history. If a decision is changed from Hold to Hired to Rejected, only the final state survives. There is no record of who made the change or when.",
+          "consequence": "If a hiring decision is ever challenged legally or internally, there is no audit trail to review. Compliance violation for any regulated industry.",
+          "fix": "Add a decisions_audit table: candidate_id, previous_decision, new_decision, changed_at timestamp, changed_by (API key or user identifier).",
+          "effort": "1-2 hours"
+        },
+        {
+          "issue_id": "P0-05",
+          "title": "System has never been tested on weak candidates, edge cases, or non-AI role types",
+          "file": "fixtures/",
+          "description": "Every test run uses one fixture: a strong AI Engineer candidate who scores 5/5 on MCQs. The system has never been validated against a weak candidate, a short-answer candidate, a BA or Trainee, or a candidate who scores poorly. There is no evidence the scores are accurate outside this one profile.",
+          "consequence": "Unvalidated system making real hiring decisions. Confident wrong feedback at scale — the exact failure the PRD identified as highest risk.",
+          "fix": "Design and run minimum 4 test fixtures: strong AI, weak AI, strong Trainee, BA candidate. Review outputs manually against expected score ranges.",
+          "effort": "Half a day"
+        }
+      ]
+    },
+
+    "P1_HIGH": {
+      "description": "Serious issues that will cause incorrect behaviour, poor evaluation quality, or significant trust problems in regular use. Must be resolved before broader internal rollout.",
+      "issues": [
+        {
+          "issue_id": "P1-01",
+          "title": "Evaluation output is non-deterministic — same candidate may score differently on re-run",
+          "file": "agents/base_agent.py",
+          "description": "LLM temperature is set to 0.1 which reduces but does not eliminate variance. The same candidate submitted twice may receive different dimension scores, different justifications, and a different AI recommendation. There is no consistency guarantee.",
+          "consequence": "Hiring managers cannot trust the system if the same inputs produce different outputs. Undermines the core value proposition of consistent evaluation.",
+          "fix": "Set temperature=0 for all evaluation agents. Add a consistency test: submit the same fixture twice and compare dimension scores. Document the acceptable variance threshold.",
+          "effort": "30 minutes for temperature fix, 1 hour for consistency validation"
+        },
+        {
+          "issue_id": "P1-02",
+          "title": "Biased interviewer questions are not detected — only agent output language is checked",
+          "file": "agents/bias_detection_agent.py",
+          "description": "The bias gate inspects the evaluation agents' output justifications for loaded language. It does not inspect the input transcript for biased interviewer questions. If an interviewer asked 'do you have family commitments' or 'where are you originally from', those questions influence the evaluation and pass through undetected.",
+          "consequence": "A biased interview produces a biased evaluation regardless of how clean the output language is. The system provides false assurance of fairness.",
+          "fix": "Add a transcript pre-screening step that flags interviewer turns containing known bias indicators before evaluation agents run. This can be a lightweight check, not a full LLM call.",
+          "effort": "2-3 hours"
+        },
+        {
+          "issue_id": "P1-03",
+          "title": "No genuine human oversight enforcement — manager can rubber-stamp AI recommendation without reviewing",
+          "file": "dashboard/app.py",
+          "description": "The dashboard shows the AI recommendation and a decision dropdown. Nothing prevents a hiring manager from seeing 'Strong Yes' and clicking 'Hired' without reading a single dimension score or justification. The system records this as a legitimate human decision.",
+          "consequence": "The legal and ethical distinction between AI-assisted decisions and rubber-stamped AI decisions disappears. Liability risk if decisions are ever challenged.",
+          "fix": "Require explicit acknowledgment before committing a decision: a checkbox confirming the manager has reviewed the full dimension breakdown. Log the timestamp of report load vs decision commit.",
+          "effort": "1-2 hours"
+        },
+        {
+          "issue_id": "P1-04",
+          "title": "FeedbackCompiler invents concerns for high-scoring candidates",
+          "file": "agents/feedback_compiler_agent.py",
+          "description": "When a candidate scores highly across all dimensions, the compiler must still produce 2-3 concern bullets per the schema constraint. It generates vague, unsupported concerns ('may need to balance technical focus with strategic thinking') that are not grounded in any evaluation evidence.",
+          "consequence": "Fabricated concerns in a hiring report are a liability. A hiring manager acting on invented concerns could incorrectly reject a strong candidate.",
+          "fix": "Make concerns optional when evidence threshold is not met. Change prompt to explicitly instruct: if fewer than 2 genuine evidence-backed concerns exist, output only the ones that are real and flag that no further concerns were identified.",
+          "effort": "1 hour prompt engineering"
+        },
+        {
+          "issue_id": "P1-05",
+          "title": "mcq_responses field is passed through entire pipeline state unnecessarily",
+          "file": "models/candidate.py",
+          "description": "Raw MCQ answer selections remain in InterviewState and are visible to all downstream agents after ingestion. This is candidate PII that should be consumed and dropped by the ingestion node, not carried through the full pipeline.",
+          "consequence": "Data hygiene violation. Evaluation agents have access to raw MCQ answers they should not see. In a regulated context this is a data minimisation failure.",
+          "fix": "Clear mcq_responses from state after ingestion node completes. Set it to None or remove from return dict in ingestion_node.",
+          "effort": "15 minutes"
+        },
+        {
+          "issue_id": "P1-06",
+          "title": "No score calibration baseline — scores have no relative meaning across candidates",
+          "file": "system-wide",
+          "description": "Scores are absolute (1-5) with no reference point. There is no defined standard for what a 3/5 on langgraph_familiarity actually means — is it passing, marginal, or failing for an AI Engineer hire? Without a calibration baseline, hiring managers cannot compare candidates against each other or against a hiring bar.",
+          "consequence": "Evaluation output is informative but not actionable for hire/no-hire decisions without a defined standard.",
+          "fix": "Define scoring anchors in each rubric dimension: what behaviour constitutes a 1, 3, and 5. Add these to the rubric JSON files and inject them into the TechnicalDepthAgent prompt.",
+          "effort": "Half a day for rubric anchor definitions"
+        }
+      ]
+    },
+
+    "P2_MEDIUM": {
+      "description": "Issues that reduce quality, reliability, or usability but do not immediately cause wrong decisions. Should be addressed before scaling to multiple teams.",
+      "issues": [
+        {
+          "issue_id": "P2-01",
+          "title": "Transcript preprocessing missing — agents do parse and evaluate simultaneously",
+          "file": "graph/pipeline.py",
+          "description": "All evaluation agents receive the full raw diarized transcript including timestamps, interviewer questions, and speaker labels. The LLM must parse the format and evaluate simultaneously. This degrades evaluation quality and wastes tokens on irrelevant content.",
+          "consequence": "Lower evaluation quality than achievable. Higher token consumption per run. Evidence quotes are less precise.",
+          "fix": "Add a transcript preprocessing node between ingestion and parallel evaluation agents. Extract candidate-only speech turns, strip timestamps and speaker labels, write clean versions to session1_candidate_turns and session2_candidate_turns in state.",
+          "effort": "2-3 hours"
+        },
+        {
+          "issue_id": "P2-02",
+          "title": "Token tracking always logs zero — broken telemetry",
+          "file": "agents/base_agent.py",
+          "description": "The 80k token alert threshold exists but token_metadata always returns zeros because structured output via with_structured_output returns the Pydantic model directly, not a response object with metadata. The 80k breach warning will never fire.",
+          "consequence": "No visibility into token consumption per agent call. No early warning before hitting context limits or cost thresholds.",
+          "fix": "Extract token usage from usage_metadata attribute on the raw AIMessage rather than response_metadata. The correct path is raw_message.usage_metadata for LangChain structured output responses.",
+          "effort": "30 minutes"
+        },
+        {
+          "issue_id": "P2-03",
+          "title": "Pydantic serializer warnings on every LLM call — noise in production logs",
+          "file": "agents/base_agent.py",
+          "description": "PydanticSerializationUnexpectedValue warnings appear on every single LLM call across all agents. These are not breaking errors but they pollute the log output, making it hard to spot real warnings.",
+          "consequence": "Log noise makes genuine errors harder to detect. In a production monitoring setup, alert fatigue from constant warnings reduces response quality.",
+          "fix": "Add include_raw=True handling that properly maps the parsed output without triggering the serializer mismatch. Alternatively suppress the specific warning at the call site if it is a known LangChain quirk.",
+          "effort": "1 hour"
+        },
+        {
+          "issue_id": "P2-04",
+          "title": "Dead code still present in pipeline.py route_after_ingestion",
+          "file": "graph/pipeline.py",
+          "description": "Two unreachable return statements remain after the active return in route_after_ingestion. These are the remnants of the original broken parallel routing approach and were never cleaned up.",
+          "consequence": "Code quality issue. Misleads any developer reading the pipeline for the first time about how routing works.",
+          "fix": "Delete the two dead return lines and the comment above them.",
+          "effort": "2 minutes"
+        },
+        {
+          "issue_id": "P2-05",
+          "title": "No README — zero onboarding documentation for new team members",
+          "file": "README.md",
+          "description": "README.md contains only the repo name. There is no explanation of what the system does, how to run it, what the API endpoints are, how to submit a candidate, or what the dashboard shows. Any new team member or stakeholder seeing this for the first time has no entry point.",
+          "consequence": "Internal adoption blocked. Nobody can use or evaluate the system without the original developer present.",
+          "fix": "Write a README covering: system overview, architecture diagram or DAG description, setup instructions, how to run the stack, how to submit a test candidate, endpoint reference, and known limitations.",
+          "effort": "2-3 hours"
+        },
+        {
+          "issue_id": "P2-06",
+          "title": "Hallucination handling dimension scores generously for adjacent concepts",
+          "file": "agents/technical_depth_agent.py",
+          "description": "The TechnicalDepthAgent maps error routing in a LangGraph pipeline to hallucination handling and awards 5/5. The rubric defines hallucination handling as guardrail implementation patterns, evaluation criteria validation, and safety system prompts — none of which the candidate explicitly demonstrated.",
+          "consequence": "Inflated scores on unmeasured dimensions reduce the signal quality of the overall evaluation.",
+          "fix": "Add explicit calibration instruction to the system prompt: adjacent or related concepts score maximum 3/5. Full marks require direct explicit evidence matching the rubric definition.",
+          "effort": "30 minutes prompt engineering"
+        }
+      ]
+    },
+
+    "P3_LOW": {
+      "description": "Quality improvements and future-proofing items. Important for long-term maintainability but not blocking near-term internal use.",
+      "issues": [
+        {
+          "issue_id": "P3-01",
+          "title": "No Whisper integration — real interview audio cannot be ingested",
+          "file": "services/transcription.py (does not exist)",
+          "description": "The only way to submit a candidate is via a manually constructed JSON fixture with transcript pasted as a string. There is no audio upload endpoint and no transcription service. This is a demo harness, not a real ingestion pipeline.",
+          "consequence": "Cannot process real interviews without manual transcript preparation. Significant operational overhead for any team using this at scale.",
+          "fix": "Implement services/transcription.py with Whisper integration and a POST /transcribe endpoint accepting audio file upload.",
+          "effort": "1 day"
+        },
+        {
+          "issue_id": "P3-02",
+          "title": "SQLite not suitable for multi-user concurrent access",
+          "file": "api/main.py",
+          "description": "SQLite handles concurrent writes poorly. If two candidates are submitted simultaneously, write locks can cause failures. For a single-user internal tool this is acceptable. For a team of hiring managers submitting evaluations concurrently it will fail.",
+          "consequence": "Concurrency failures under normal team usage.",
+          "fix": "Migrate to PostgreSQL or keep SQLite but add connection pooling and WAL mode for improved concurrency. PRD specified AWS RDS for production.",
+          "effort": "Half a day for PostgreSQL migration"
+        },
+        {
+          "issue_id": "P3-03",
+          "title": "CONTEXT.md language glossary not enforced — terminology drift will occur over time",
+          "file": "CONTEXT.md",
+          "description": "CONTEXT.md defines precise terminology (Session 1 not technical interview, EvalScore not score, etc.) but there is no mechanism to enforce it. As the codebase grows and more developers contribute, terminology drift will make the codebase inconsistent.",
+          "consequence": "Long-term maintainability issue. New developers will use inconsistent terminology, making code review and documentation harder.",
+          "fix": "Add a linting rule or pre-commit hook that flags avoided terms in code comments and docstrings. At minimum, reference CONTEXT.md explicitly in the README onboarding section.",
+          "effort": "1-2 hours"
+        }
+      ]
+    }
+  },
+
+  "summary": {
+    "P0_BLOCKING": 5,
+    "P1_HIGH": 6,
+    "P2_MEDIUM": 6,
+    "P3_LOW": 3,
+    "total": 20,
+    "recommended_sequence": [
+      "P0-01: Fix candidate_id collision — 15 minutes, do immediately",
+      "P0-02: Add answer keys for all role types — 30 minutes",
+      "P0-05: Run validation fixtures across score range — half a day",
+      "P0-03: Add API key authentication — 2-3 hours",
+      "P0-04: Add hiring decision audit trail — 1-2 hours",
+      "P1-01: Set temperature=0, run consistency test — 1 hour",
+      "P1-04: Fix invented concerns for high scorers — 1 hour",
+      "P1-05: Clear mcq_responses after ingestion — 15 minutes",
+      "P1-06: Define scoring anchors in rubric files — half a day",
+      "P1-02: Add interviewer bias pre-screening — 2-3 hours",
+      "P1-03: Add human oversight acknowledgment — 1-2 hours",
+      "P2-04: Delete dead code in pipeline.py — 2 minutes",
+      "P2-02: Fix token tracking telemetry — 30 minutes",
+      "P2-06: Fix hallucination handling score inflation — 30 minutes",
+      "P2-03: Suppress Pydantic serializer warnings — 1 hour",
+      "P2-01: Add transcript preprocessing node — 2-3 hours",
+      "P2-05: Write README — 2-3 hours",
+      "P3-01: Implement Whisper transcription service — 1 day",
+      "P3-02: Migrate to PostgreSQL for concurrent access — half a day",
+      "P3-03: Enforce CONTEXT.md terminology — 1-2 hours"
+    ]
+  }
+}

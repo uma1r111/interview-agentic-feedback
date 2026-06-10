@@ -1,0 +1,6 @@
+when a candidate scores this highly, the compiler struggles to find genuine concerns and invents soft ones.
+
+venv activation: .\venv\Scripts\activate.bat
+server: uvicorn api.main:app --reload
+python test file: python submit_test.py
+streamlit: streamlit run dashboard/app.py
