@@ -4,8 +4,9 @@ from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, status
 
-# FIXED: Added CandidateBundle and RoleType to your api.schemas imports
-from api.schemas import DecisionPatchPayload, IntakeRequestPayload, CandidateBundle, RoleType
+from api.schemas import DecisionPatchPayload
+from models.candidate import CandidateBundle
+from models.enums import RoleType, Decision
 from config.settings import get_settings
 from graph.pipeline import create_interview_graph
 from services.database import (
@@ -30,9 +31,8 @@ app = FastAPI(
 )
 
 interview_graph = create_interview_graph()
-
-# Instantiate shared PDF extraction utility from CV Agent branch
 pdf_extractor = PDFExtractorService()
+
 
 # ==============================================================================
 # Application Startup
@@ -40,7 +40,6 @@ pdf_extractor = PDFExtractorService()
 
 @app.on_event("startup")
 def on_startup():
-    # Utilizing your clean service-level database initialization
     init_database()
 
 
@@ -71,13 +70,14 @@ async def submit_candidate_intake(
     """
     logger.info(f"API: Received pipeline evaluation request for candidate: {candidate_name}")
 
-    # 1. Validate and extract the uploaded CV PDF (CV Agent logic)
+    # 1. Validate CV file type
     if cv_file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported file type '{cv_file.content_type}'. Only PDF files are accepted."
         )
 
+    # 2. Extract text from the uploaded CV PDF
     try:
         pdf_bytes = await cv_file.read()
         raw_cv_text = pdf_extractor.extract_text(pdf_bytes)
@@ -94,16 +94,16 @@ async def submit_candidate_intake(
             detail=f"Failed to process uploaded CV file: {str(pdf_err)}"
         )
 
-    # 2. Parse the MCQ selections JSON string sent as a form field
+    # 3. Parse the MCQ selections JSON string sent as a form field
     try:
         mcq_selections_dict = json.loads(mcq_selections)
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="mcq_selections must be a valid JSON string. Example: '{\"q1\": \"A\", \"q2\": \"C\"}'"
+            detail='mcq_selections must be a valid JSON string. Example: {"q1": "A", "q2": "C"}'
         )
 
-    # 3. Validate the full candidate bundle with Pydantic
+    # 4. Validate the full candidate bundle with Pydantic
     try:
         candidate_bundle = CandidateBundle(
             candidate_name=candidate_name,
@@ -120,23 +120,27 @@ async def submit_candidate_intake(
             detail=f"Candidate bundle validation failed: {str(validation_err)}"
         )
 
-    # 4. Build initial state and invoke the LangGraph pipeline
+    # 5. Build initial state and invoke the LangGraph pipeline
     try:
         initial_inputs = {
-            "candidate_name": candidate_bundle.candidate_name,
-            "role_type":      candidate_bundle.role_type,
-            "raw_cv":         candidate_bundle.raw_cv,
-            "mcq_score":      candidate_bundle.mcq_score,
+            "candidate_name":      candidate_bundle.candidate_name,
+            "role_type":           candidate_bundle.role_type,
+            "raw_cv":              candidate_bundle.raw_cv,
+            "mcq_score":           candidate_bundle.mcq_score,
             "programming_answers": candidate_bundle.programming_answers,
             "session1_transcript": candidate_bundle.session1_transcript,
             "session2_transcript": candidate_bundle.session2_transcript,
-            "raw_payload":    candidate_bundle.model_dump(),
-            "mcq_responses":  mcq_selections_dict
+            "raw_payload":         candidate_bundle.model_dump(),
+            "mcq_responses":       mcq_selections_dict
         }
 
         final_output_state = interview_graph.invoke(initial_inputs)
 
         logger.info(f"Final state keys: {list(final_output_state.keys())}")
+        logger.info(f"feedback_report: {final_output_state.get('feedback_report')}")
+        logger.info(f"bias_clear: {final_output_state.get('bias_clear')}")
+        logger.info(f"error: {final_output_state.get('error')}")
+
         if final_output_state.get("error"):
             logger.error(f"API: Graph pipeline aborted: {final_output_state['error']}")
             raise HTTPException(
@@ -145,8 +149,6 @@ async def submit_candidate_intake(
             )
 
         candidate_id = final_output_state["candidate_id"]
-        
-        # Using your clean external service implementation instead of inline SQLite
         save_candidate(candidate_id, final_output_state)
         logger.info(f"API: Evaluation cycle completed. Candidate saved with ID: {candidate_id}")
 
@@ -168,11 +170,13 @@ async def submit_candidate_intake(
 
 @app.get("/candidates", status_code=status.HTTP_200_OK)
 def list_candidates() -> List[Dict[str, Any]]:
+    """Returns lightweight candidate list for dashboard navigation."""
     return get_all_candidates()
 
 
 @app.get("/candidates/{candidate_id}/report", status_code=status.HTTP_200_OK)
 def get_report(candidate_id: str) -> Any:
+    """Fetches the final structured evaluation feedback report for a candidate."""
     report = get_candidate_report(candidate_id)
     if not report:
         raise HTTPException(
@@ -184,6 +188,7 @@ def get_report(candidate_id: str) -> Any:
 
 @app.get("/candidates/{candidate_id}/audit", status_code=status.HTTP_200_OK)
 def get_audit_trail(candidate_id: str) -> List[Dict[str, Any]]:
+    """Returns the full decision audit trail for a candidate."""
     audit = get_decision_audit(candidate_id)
     if not audit:
         raise HTTPException(
@@ -195,6 +200,7 @@ def get_audit_trail(candidate_id: str) -> List[Dict[str, Any]]:
 
 @app.patch("/candidates/{candidate_id}/decision", status_code=status.HTTP_200_OK)
 def patch_decision(candidate_id: str, payload: DecisionPatchPayload) -> Dict[str, str]:
+    """Updates a candidate's hiring decision. Only the decision column is updated."""
     updated = update_hiring_decision(candidate_id, payload.decision)
     if not updated:
         raise HTTPException(
