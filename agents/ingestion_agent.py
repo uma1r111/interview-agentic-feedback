@@ -43,6 +43,7 @@ class IngestionAgent:
                 "candidate_id": f"cand_{validated_bundle.candidate_name.lower().replace(' ', '_')}",
                 "candidate_name": validated_bundle.candidate_name,
                 "role_type": validated_bundle.role_type,
+                "raw_cv": validated_bundle.raw_cv,
                 "mcq_score": scored_mcq,
                 "programming_answers": validated_bundle.programming_answers,
                 "session1_transcript": validated_bundle.session1_transcript,

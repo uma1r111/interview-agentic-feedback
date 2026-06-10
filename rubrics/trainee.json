@@ -1,5 +1,12 @@
 {
   "role_type": "Trainee",
+  "required_skills": [
+    "Python",
+    "Basic Data Structures",
+    "Problem Decomposition",
+    "Git"
+  ],
+  "min_experience_years": 0,
   "dimensions": {
     "learning_agility": "Evaluates code assimilation speed, coachability signals, feedback loop processing, and abstract interest.",
     "problem_decomposition": "Evaluates splitting complex prompts into step-by-step modular procedural code functions.",

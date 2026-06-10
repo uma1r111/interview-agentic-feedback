@@ -1,7 +1,7 @@
 import logging
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Optional
 from agents.base_agent import BaseAgent
-from models.evaluation import EvalScore, TechnicalDimensionReport, FeedbackReport
+from models.evaluation import EvalScore, TechnicalDimensionReport, FeedbackReport, ExperienceMatchSummary
 from models.enums import RoleType, Recommendation, Decision
 
 logger = logging.getLogger("FeedbackCompilerAgent")
@@ -26,7 +26,8 @@ class FeedbackCompilerAgent(BaseAgent):
         technical: TechnicalDimensionReport,        # CHANGED from EvalScore
         problem_solving: EvalScore,
         cultural: EvalScore,
-        bias_clear: bool
+        bias_clear: bool,
+        cv_experience_match: Optional[ExperienceMatchSummary] = None
     ) -> Tuple[FeedbackReport, Dict[str, int]]:
         """
         Synthesizes individual agent scores and text justifications into a consolidated,
@@ -58,6 +59,19 @@ class FeedbackCompilerAgent(BaseAgent):
                 + "\n"
             )
 
+        # Serialize cv_experience_match (if present) for minor contextual weighting
+        cv_block = ""
+        if cv_experience_match:
+            cv_block = (
+                f"--- START CV EXPERIENCE MATCH (Minor Contextual Weight) ---\n"
+                f"Years of Experience: {cv_experience_match.years_of_experience} (Role min: {cv_experience_match.role_min_experience})\n"
+                f"Domain Match fit: {cv_experience_match.domain_match}\n"
+                f"Overall CV Rating fit: {cv_experience_match.overall_match_rating}\n"
+                f"Required Skills Present: {cv_experience_match.required_skills_present}\n"
+                f"Required Skills Missing: {cv_experience_match.required_skills_missing}\n"
+                f"--- END CV EXPERIENCE MATCH ---\n\n"
+            )
+
         system_prompt = (
             "You are an executive hiring board director and chief technical assessment officer.\n"
             "Your objective is to ingest individual dimension scores and transform them into a polished, "
@@ -75,8 +89,18 @@ class FeedbackCompilerAgent(BaseAgent):
             "and exactly 2 to 3 for concerns. Draw from technical dimension scores, communication quality, "
             "problem solving indicators, and cultural alignment signals.\n"
             "5. Dynamic Recommendation: Formulate a final holistic 'ai_recommendation' enum value ('Strong Yes', 'Yes', 'Maybe', 'No') "
-            "and a single-sentence 'ai_justification'. Factor in all dimensions — a candidate with high overall scores "
-            "but weak dimension-level gaps (e.g. low hallucination_handling for an AI role) should be weighted accordingly.\n\n"
+            "and a single-sentence 'ai_justification'. Factor in all interview dimensions as the primary signals.\n"
+            "   - CV vs. Interview Validation: If the CV lists a skill as 'missing' under required_skills_missing, "
+            "but the candidate demonstrated strong, accurate knowledge of that exact skill in the interview feeds "
+            "(e.g., they got a high score like 4 or 5 on a corresponding technical dimension like langgraph_familiarity or rag_delivery_experience), "
+            "treat the skill as validated. Do not list that skill as a concern, and do not penalize their final 'ai_recommendation' for it.\n"
+            "   - Weighting Signal (CV Fit): If a CV Experience Match block is provided, use it as a secondary, minor weighting signal. "
+            "Specifically, if the candidate has flawless or outstanding interview scores (e.g., scoring 4/5 or 5/5 across all evaluated dimensions), "
+            "their technical competency is proven. In this case, you MUST recommend them as 'Yes' or 'Strong Yes'. "
+            "You are STRICTLY FORBIDDEN from downgrading their AI recommendation to 'Maybe' or 'No' solely due to CV experience gaps or resume missing skills. "
+            "Instead, issue a clear 'Yes' (or 'Strong Yes' if exceptional), and list the experience/resume gaps in the 'concerns' block for the hiring manager's review. "
+            "Only if the candidate's actual interview performance was average or mixed (e.g., multiple scores of 3/5 or below) AND they have a weak CV match, "
+            "should you issue a recommendation of 'Maybe' or 'No'.\n\n"
             "Enforce strict conformity with this exact structured payload schema:\n"
             "- candidate_name: Full name of candidate\n"
             "- role_applied: String representation of the target career track\n"
@@ -98,6 +122,7 @@ class FeedbackCompilerAgent(BaseAgent):
             f"Candidate: {candidate_name}\n"
             f"Target Role: {role_type.value}\n"
             f"Programmatic MCQ Score: {mcq_score}/5.0\n\n"
+            f"{cv_block}"
             f"--- START CODE INPUTS ---\n"
             f"Q1 Code: {programming_answers[0]}\n"
             f"Q2 Code: {programming_answers[1]}\n"

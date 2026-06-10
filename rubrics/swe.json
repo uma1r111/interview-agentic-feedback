@@ -1,9 +1,19 @@
 {
   "role_type": "SWE",
+  "required_skills": [
+    "Python",
+    "Data Structures",
+    "System Design",
+    "SQL",
+    "REST APIs",
+    "Git",
+    "Algorithms"
+  ],
+  "min_experience_years": 2,
   "dimensions": {
     "algorithms": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
     "system_design": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",
     "debugging": "Evaluates code navigation, root-cause isolation speed, and edge case correction patterns.",
     "code_quality_reasoning": "Evaluates clean code philosophy, readability choices, naming conventions, and structural maintainability reasoning."
   }
-}
+}
