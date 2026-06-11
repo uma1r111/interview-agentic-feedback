@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Pipeline
     token_alert_threshold: int = 80000
-    llm_temperature: float = 0.1
+    llm_temperature: float = 0.0
 
     # App
     app_title: str = "AI Interview Feedback Pipeline Server"
