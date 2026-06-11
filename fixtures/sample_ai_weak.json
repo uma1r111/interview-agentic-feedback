@@ -1,0 +1,11 @@
+{
+  "candidate_name": "Bilal Siddiqui",
+  "role_type": "AI",
+  "mcq_score": 1.0,
+  "programming_answers": [
+    "def merge_and_sort(arr1, arr2):\n    return arr1 + arr2",
+    "def fix_collection_mismatch(elements_list):\n    return elements_list"
+  ],
+  "session1_transcript": "[00:00:15] Interviewer_Technical_Senior: Welcome Bilal. You scored 1/5 on the MCQs. Walk us through your coding approach.\n[00:00:35] Candidate: For the first question I just combined the two arrays. I wasn't sure about sorting.\n[00:01:10] Interviewer_Technical_Junior: Can you explain your experience with machine learning systems?\n[00:01:25] Candidate: I have done some machine learning projects in university. I used scikit-learn for classification.\n[00:02:10] Interviewer_Technical_Senior: How would you approach building a RAG pipeline?\n[00:02:30] Candidate: I think RAG involves retrieving documents and passing them to a language model. I haven't built one in production.\n[00:03:15] Interviewer_Technical_Junior: Have you worked with LangChain or LangGraph?\n[00:03:40] Candidate: I have heard of LangChain but haven't used it extensively. I read some documentation about it.",
+  "session2_transcript": "[00:00:10] Interviewer_HR: What are your professional strengths and weaknesses?\n[00:00:25] Candidate: I am a hard worker. My weakness is sometimes I work too hard.\n[00:01:10] Interviewer_HR: How do you handle tight deadlines?\n[00:01:30] Candidate: I try to finish the work as fast as possible.\n[00:02:15] Interviewer_HR: Where do you see yourself in five years?\n[00:02:30] Candidate: I want to be a senior developer and earn more money."
+}

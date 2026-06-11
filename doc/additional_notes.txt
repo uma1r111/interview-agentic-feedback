@@ -1,6 +1,10 @@
-when a candidate scores this highly, the compiler struggles to find genuine concerns and invents soft ones.
+- when a candidate scores this highly, the compiler struggles to find genuine concerns and invents soft ones.
 
-venv activation: .\venv\Scripts\activate.bat
-server: uvicorn api.main:app --reload
-python test file: python submit_test.py
-streamlit: streamlit run dashboard/app.py
+- venv activation: .\venv\Scripts\activate.bat
+- server: uvicorn api.main:app --reload
+- python test file: python scripts/submit_test.py
+- streamlit: streamlit run dashboard/app.py
+
+- P0-03 DEFERRED: API has no authentication. Safe for localhost development only. Must 
+                  implement API key auth before any network deployment or internal rollout.
+

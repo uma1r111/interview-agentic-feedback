@@ -12,9 +12,8 @@ import json
 import sys
 import requests
 
-API_URL       = "http://127.0.0.1:8000/candidates"
-FIXTURE_PATH  = "fixtures/sample_candidate.json"
-DEFAULT_CV    = "fixtures/sample_cv.pdf"    # put any CV PDF here
+API_URL      = "http://127.0.0.1:8000/candidates"
+DEFAULT_CV   = "fixtures/sample_cv.pdf"
 
 MOCK_MCQ_ANSWERS = {
     "q1_decision_trees":       "A",
@@ -25,16 +24,16 @@ MOCK_MCQ_ANSWERS = {
 }
 
 
-def send_candidate_to_pipeline(cv_pdf_path: str):
+def send_candidate_to_pipeline(fixture_path: str, cv_pdf_path: str):
     print(f"\n{'='*60}")
     print("SUBMIT TEST — Full Pipeline API Test")
     print(f"{'='*60}")
-    print(f"Reading fixture : {FIXTURE_PATH}")
+    print(f"Reading fixture : {fixture_path}")
     print(f"CV PDF file     : {cv_pdf_path}")
 
     # 1. Load the candidate fixture JSON
     try:
-        with open(FIXTURE_PATH, "r", encoding="utf-8") as f:
+        with open(fixture_path, "r", encoding="utf-8") as f:
             fixture = json.load(f)
     except FileNotFoundError:
         print(f"[Error] Fixture file not found: {FIXTURE_PATH}")
@@ -98,5 +97,6 @@ def send_candidate_to_pipeline(cv_pdf_path: str):
 
 
 if __name__ == "__main__":
-    cv_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_CV
-    send_candidate_to_pipeline(cv_path)
+    fixture = sys.argv[1] if len(sys.argv) > 1 else "fixtures/sample_ai_strong.json"
+    cv_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_CV
+    send_candidate_to_pipeline(fixture, cv_path)
