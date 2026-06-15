@@ -273,15 +273,76 @@ if candidate_id_to_load:
         st.markdown(f"**System Rationale:** *{report['ai_justification']}*")
         st.warning(f"Current Status: **Hiring Manager Decision = {report['hiring_manager_decision']}**")
 
-        with st.form("decision_override_form"):
-            selected_decision = st.selectbox(
-                "Update Candidate Status:",
-                options=["Hold", "Hired", "Rejected"]
-            )
-            if st.form_submit_button("Commit Decision to Server", use_container_width=True):
-                if submit_decision(candidate_id_to_load, selected_decision):
-                    st.session_state.selected_candidate_id = candidate_id_to_load
+        st.markdown("---")
+        st.markdown("#### 📋 Human Review Acknowledgment")
+        st.info(
+            "Before committing a hiring decision, you must confirm that you have reviewed "
+            "the full evaluation report including all dimension scores, bias flags, and "
+            "agent justifications. This acknowledgment is logged against your decision."
+        )
 
+        # Track when report was first loaded into session
+        load_key = f"report_loaded_at_{candidate_id_to_load}"
+        if load_key not in st.session_state:
+            from datetime import datetime, timezone
+            st.session_state[load_key] = datetime.now(timezone.utc).isoformat()
+
+        # Acknowledgment checkboxes — all three must be checked before form unlocks
+        check_dimensions = st.checkbox(
+            "✅ I have reviewed all dimension scores and justifications in the technical breakdown."
+        )
+        check_bias = st.checkbox(
+            "✅ I have reviewed the bias pre-screen results and any interviewer bias flags."
+        )
+        check_responsibility = st.checkbox(
+            "✅ I understand this decision is my professional responsibility and is not solely based on the AI recommendation."
+        )
+
+        all_acknowledged = check_dimensions and check_bias and check_responsibility
+
+        if not all_acknowledged:
+            st.error(
+                "⛔ Decision form is locked. Please confirm all three acknowledgments above "
+                "to unlock the hiring decision controls."
+            )
+        else:
+            st.success("🔓 Acknowledgments confirmed. You may now commit a hiring decision.")
+
+            with st.form("decision_override_form"):
+                selected_decision = st.selectbox(
+                    "Update Candidate Status:",
+                    options=["Hold", "Hired", "Rejected"]
+                )
+
+                st.markdown("---")
+
+                # Show time elapsed between report load and decision commit
+                from datetime import datetime, timezone
+                loaded_at = st.session_state.get(load_key, "Unknown")
+                st.caption(f"📅 Report first loaded at: `{loaded_at}`")
+                st.caption(f"⏱️ Decision being committed at: `{datetime.now(timezone.utc).isoformat()}`")
+
+                if st.form_submit_button("Commit Decision to Server", use_container_width=True):
+                    commit_time = datetime.now(timezone.utc).isoformat()
+                    loaded_time = st.session_state.get(load_key, "Unknown")
+
+                    # Log the oversight audit trail to console
+                    import logging
+                    oversight_logger = logging.getLogger("HumanOversight")
+                    oversight_logger.info(
+                        f"HUMAN DECISION COMMITTED | "
+                        f"Candidate: {candidate_id_to_load} | "
+                        f"Decision: {selected_decision} | "
+                        f"Report loaded at: {loaded_time} | "
+                        f"Decision committed at: {commit_time} | "
+                        f"Acknowledgments: dimensions=True, bias=True, responsibility=True"
+                    )
+
+                    if submit_decision(candidate_id_to_load, selected_decision):
+                        st.session_state.selected_candidate_id = candidate_id_to_load
+                        # Clear the load timestamp so next load gets a fresh timestamp
+                        if load_key in st.session_state:
+                            del st.session_state[load_key]
 else:
     # ==============================================================================
     # Welcome / Empty State
