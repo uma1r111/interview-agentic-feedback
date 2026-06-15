@@ -11,11 +11,53 @@
   ],
   "min_experience_years": 1,
   "dimensions": {
-    "requirements_gathering": "Evaluates user story decomposition, business scope discovery, and process engineering mapping.",
-    "stakeholder_communication": "Evaluates clarity of delivery, conflict resolution framing, and translation of technical requirements to business values.",
-    "analytical_thinking": "Evaluates metric tracking design, KPI optimization analysis, and data-driven prioritization approaches.",
-    "sql": "Evaluates complex aggregations, window operations, performance indexing, and multi-table joining techniques.",
-    "excel": "Evaluates advanced model forecasting, macro processing, array lookups, and pivot data summaries.",
-    "power_bi": "Evaluates semantic model design, DAX calculated metric formulas, and interactive canvas layout usability."
+    "requirements_gathering": {
+      "description": "Evaluates user story decomposition, business scope discovery, elicitation techniques, and process engineering mapping.",
+      "anchors": {
+        "1": "Candidate cannot decompose a business problem into discrete requirements. Treats requirements as a single monolithic specification. Cannot write a user story or explain what acceptance criteria are.",
+        "3": "Candidate can write basic user stories ('As a [user], I want [feature], so that [outcome]') and define acceptance criteria. Can identify functional requirements but misses non-functional requirements (performance, security, scalability). Elicitation relies mainly on asking direct questions without structured discovery techniques.",
+        "5": "Candidate uses structured elicitation techniques (interviews, workshops, observation, document analysis) and can explain why each is appropriate in different contexts. Decomposes epics into user stories with clear acceptance criteria, identifies edge cases, maps as-is and to-be processes explicitly, and distinguishes functional from non-functional requirements. Can trace requirements back to measurable business outcomes."
+      }
+    },
+    "stakeholder_communication": {
+      "description": "Evaluates clarity of delivery, conflict resolution framing, influence without authority, and translation of technical constraints to business language.",
+      "anchors": {
+        "1": "Candidate cannot adapt communication for different audiences. Uses the same technical language with developers and executives. Has no strategy for resolving conflicting stakeholder priorities or handling pushback.",
+        "3": "Candidate adjusts communication style when prompted and can describe a situation where they translated technical constraints into business terms. Has a basic approach to conflict (e.g. escalation), but relies on someone else to resolve disagreements between stakeholders.",
+        "5": "Candidate proactively tailors communication by audience without prompting. Can describe a specific approach to managing conflicting stakeholder priorities (e.g. MoSCoW prioritisation, impact/effort matrix, structured trade-off discussion). Uses concrete examples of influencing decisions without formal authority and demonstrates awareness of political dynamics in stakeholder environments."
+      }
+    },
+    "analytical_thinking": {
+      "description": "Evaluates structured problem decomposition, metric design, KPI identification, root-cause analysis, and data-driven prioritisation.",
+      "anchors": {
+        "1": "Candidate cannot structure a problem analytically. Jumps to solutions without decomposing the problem. Cannot define a metric for success or explain what a KPI is in operational terms.",
+        "3": "Candidate can identify relevant KPIs for a given business problem and explain what they measure. Applies basic root-cause techniques (e.g. 5 Whys). May not proactively challenge assumptions or question whether the right problem is being solved.",
+        "5": "Candidate structures problems using frameworks (e.g. MECE decomposition, fishbone analysis, hypothesis tree). Designs metrics that are measurable, actionable, and tied to business outcomes — not vanity metrics. Proactively questions problem framing, identifies proxy metric risks, and demonstrates evidence-based prioritisation with documented assumptions."
+      }
+    },
+    "sql": {
+      "description": "Evaluates complex aggregations, window functions, performance indexing awareness, CTEs, and multi-table joining techniques.",
+      "anchors": {
+        "1": "Candidate can write a basic SELECT with a WHERE clause. Cannot write a JOIN, GROUP BY, or aggregate function correctly. Has no awareness of how query structure affects performance.",
+        "3": "Candidate writes correct INNER/LEFT JOINs, aggregations with GROUP BY and HAVING, and basic subqueries. Understands the difference between WHERE and HAVING. Cannot write window functions (ROW_NUMBER, RANK, LAG/LEAD) or CTEs. Limited awareness of indexing.",
+        "5": "Candidate writes complex multi-table queries with CTEs, window functions, and proper aggregation. Can explain the execution order of SQL clauses, knows when to use a CTE vs a subquery, understands how indexes affect query performance (covering indexes, selectivity), and can optimise a slow query by reading an execution plan."
+      }
+    },
+    "excel": {
+      "description": "Evaluates advanced formulas, dynamic arrays, pivot tables, macro processing capability, and financial/forecasting model construction.",
+      "anchors": {
+        "1": "Candidate uses Excel for basic data entry and simple SUM/AVERAGE formulas. Cannot write a VLOOKUP correctly, create a pivot table, or explain what an array formula does.",
+        "3": "Candidate writes VLOOKUP/XLOOKUP, IF nesting, and creates pivot tables with grouping and calculated fields. Uses basic charts. Limited experience with INDEX/MATCH, named ranges, or data validation. Cannot write macros.",
+        "5": "Candidate builds structured analytical models using XLOOKUP, INDEX/MATCH, dynamic array functions (FILTER, UNIQUE, SORT), and Power Query for data transformation. Designs pivot tables with slicers and calculated items. Has written VBA macros for automation or built financial models with scenario analysis, sensitivity tables, and structured layout for auditability."
+      }
+    },
+    "power_bi": {
+      "description": "Evaluates semantic data model design, DAX calculated measures and columns, report layout usability, and performance optimisation.",
+      "anchors": {
+        "1": "Candidate has seen Power BI but cannot build a report from scratch. Does not understand what a semantic model or relationship is. Cannot write a DAX expression beyond a simple SUM.",
+        "3": "Candidate builds reports from imported data, creates relationships between tables, and writes basic DAX measures (CALCULATE, FILTER, SUM, DIVIDE). Creates bar charts, slicers, and drill-through pages. Does not optimise the data model (e.g. star schema, avoid bi-directional relationships) or use advanced DAX patterns (time intelligence, RANKX, iterators).",
+        "5": "Candidate designs a star-schema semantic model, explains why bi-directional relationships are usually avoided, writes advanced DAX (time intelligence functions: DATEADD, SAMEPERIODLASTYEAR; iterators: SUMX; context transition: CALCULATE with complex filters). Applies performance best practices (import vs DirectQuery trade-offs, aggregations, reducing cardinality). Designs reports for end-user usability with clear visual hierarchy and accessible colour palettes."
+      }
+    }
   }
-}
+}

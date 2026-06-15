@@ -7,10 +7,32 @@
     "Git"
   ],
   "min_experience_years": 0,
+  "grading_curve": "soft_assessment_scale",
+  "grading_note": "This role is assessed on learning potential and foundational thinking, not production-level experience. A score of 3 is a positive hiring signal. Penalise only for inability to learn or reason, not for gaps in knowledge.",
   "dimensions": {
-    "learning_agility": "Evaluates code assimilation speed, coachability signals, feedback loop processing, and abstract interest.",
-    "problem_decomposition": "Evaluates splitting complex prompts into step-by-step modular procedural code functions.",
-    "cs_fundamentals": "Evaluates basic loops, conditional array arrays, type primitives, and foundational computer logic flow."
-  },
-  "grading_curve": "soft_assessment_scale"
+    "learning_agility": {
+      "description": "Evaluates how quickly the candidate absorbs new concepts, responds to hints and corrections, processes feedback in real time, and demonstrates genuine intellectual curiosity.",
+      "anchors": {
+        "1": "Candidate does not engage with hints or corrections during the interview. Repeats the same incorrect approach after being redirected. Shows no curiosity — does not ask clarifying questions or attempt to understand why a correction was made.",
+        "3": "Candidate picks up hints after one or two prompts and adjusts their approach. Shows genuine interest in understanding the correct solution. May not arrive at the optimal answer independently but demonstrates willingness to learn and engages with feedback constructively.",
+        "5": "Candidate immediately integrates feedback and adapts their approach in real time. Asks insightful follow-up questions that show they want to understand the underlying principle, not just the answer. Connects new information to prior knowledge spontaneously. Demonstrates enthusiasm for learning beyond the immediate problem."
+      }
+    },
+    "problem_decomposition": {
+      "description": "Evaluates ability to break a complex prompt into step-by-step modular components, reason through sub-problems sequentially, and identify dependencies between steps.",
+      "anchors": {
+        "1": "Candidate attempts to solve the problem in one undivided block without breaking it down. Cannot articulate the sub-problems involved. Jumps to writing code without a plan, gets stuck, and cannot recover independently.",
+        "3": "Candidate verbalises the problem before coding and identifies 2–3 sub-steps. May not identify all dependencies or edge cases upfront but builds a solution incrementally and adjusts when a sub-step does not work. Code structure reflects some decomposition even if not perfect.",
+        "5": "Candidate explicitly maps the problem into named sub-problems before writing any code. Identifies dependencies between steps, considers edge cases (empty input, type mismatch) at the planning stage, and produces modular code where each function has a single clear responsibility. Can explain their decomposition reasoning clearly when asked."
+      }
+    },
+    "cs_fundamentals": {
+      "description": "Evaluates understanding of basic loops, conditionals, list and dictionary operations, type primitives, and foundational programming logic flow.",
+      "anchors": {
+        "1": "Candidate cannot write a correct for-loop or conditional without syntax errors. Does not understand the difference between a list and a dictionary. Cannot explain what a variable is or trace through a 5-line code block to predict the output.",
+        "3": "Candidate writes correct loops, conditionals, and list operations. Understands indexing, basic string manipulation, and the difference between mutable and immutable types. May struggle with nested structures (list of dicts) or function return values but can correct errors with minimal guidance.",
+        "5": "Candidate writes clean, correct Python across loops, conditionals, list/dict/set operations, and basic functions with return values. Understands scope (local vs global), can trace execution through nested structures, explains the difference between mutable and immutable types with an example, and handles common edge cases (index out of range, key not found) proactively."
+      }
+    }
+  }
 }

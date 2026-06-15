@@ -11,9 +11,37 @@
   ],
   "min_experience_years": 2,
   "dimensions": {
-    "algorithms": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
-    "system_design": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",
-    "debugging": "Evaluates code navigation, root-cause isolation speed, and edge case correction patterns.",
-    "code_quality_reasoning": "Evaluates clean code philosophy, readability choices, naming conventions, and structural maintainability reasoning."
+    "algorithms": {
+      "description": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
+      "anchors": {
+        "1": "Candidate cannot reason about time or space complexity. Chooses naive data structures (e.g. nested loops over a list when a set would give O(1) lookup). Cannot explain why one approach is faster than another.",
+        "3": "Candidate correctly identifies the Big-O of their solution and can name a more efficient alternative. Understands when to use a hash map vs a list, but may not spontaneously apply it — requires prompting. Can discuss trade-offs at a surface level.",
+        "5": "Candidate proactively reasons about complexity before writing code. Selects optimal data structures without prompting, explains space-time trade-offs, handles edge cases (empty input, duplicates, overflow), and can compare multiple algorithmic approaches by complexity and practical performance."
+      }
+    },
+    "system_design": {
+      "description": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",
+      "anchors": {
+        "1": "Candidate cannot decompose a system into components. Describes a single-tier monolith with no awareness of scalability concerns, API boundaries, or failure modes.",
+        "3": "Candidate can identify major components (e.g. API layer, database, cache) and describe a basic client-server model. Understands horizontal vs vertical scaling conceptually but cannot design for specific load targets. May identify one bottleneck but not a remediation strategy.",
+        "5": "Candidate designs a system with clear service boundaries, defines explicit API contracts, reasons about data flow under load, identifies at least two potential bottlenecks with concrete mitigation strategies (e.g. read replicas, CDN caching, message queues), and addresses failure handling."
+      }
+    },
+    "debugging": {
+      "description": "Evaluates code navigation, root-cause isolation speed, and edge case correction patterns.",
+      "anchors": {
+        "1": "Candidate cannot systematically isolate a bug. Resorts to guessing or randomly changing values. Cannot explain what a specific error message means or where in the code to start looking.",
+        "3": "Candidate uses a structured approach (e.g. read the stack trace, add print statements, narrow the scope). Can identify the bug with guidance but may miss the root cause — fixes the symptom rather than the underlying issue.",
+        "5": "Candidate immediately reads the error signal, traces execution flow mentally or verbally, isolates the root cause without trial-and-error, explains why the bug exists and not just what it is, and identifies related edge cases that could trigger the same failure path."
+      }
+    },
+    "code_quality_reasoning": {
+      "description": "Evaluates clean code philosophy, readability choices, naming conventions, and structural maintainability reasoning.",
+      "anchors": {
+        "1": "Candidate writes code with single-letter variable names, no comments on non-obvious logic, deeply nested conditionals, and cannot articulate any reasoning for structural choices. Code is functional but unreadable.",
+        "3": "Candidate uses meaningful names and reasonable function decomposition. Can explain why they split code into functions. May not proactively consider future maintainability but will improve code quality if asked about readability.",
+        "5": "Candidate proactively applies clean code principles: self-documenting names, single-responsibility functions, avoids deep nesting, explains SOLID reasoning where relevant, considers how a future engineer would read the code, and discusses where comments add value vs where they are noise."
+      }
+    }
   }
-}
+}

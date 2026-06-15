@@ -14,14 +14,77 @@
   ],
   "min_experience_years": 2,
   "dimensions": {
-    "algorithms": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
-    "system_design": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",
-    "debugging": "Evaluates code navigation, root-cause isolation speed, and edge case correction patterns.",
-    "code_quality_reasoning": "Evaluates clean code philosophy, readability choices, naming conventions, and structural maintainability reasoning.",
-    "langgraph_familiarity": "Evaluates understanding of stateful multi-agent DAGs, loop boundaries, and memory persistence channels.",
-    "rag_delivery_experience": "Evaluates chunking strategies, vector embeddings storage management, and contextual retrieval matching pipelines.",
-    "hallucination_handling": "Evaluates guardrail implementation patterns, evaluation criteria validation, and safety system prompts.",
-    "quantization": "Evaluates model compression understanding, FP16/INT8 weight optimization, and memory footprint management.",
-    "ml_fundamentals": "Evaluates cross-validation, loss function optimization mechanics, and neural token attention math foundations."
+    "algorithms": {
+      "description": "Evaluates candidate choice of data structures, computational complexity awareness, and efficiency trade-offs.",
+      "anchors": {
+        "1": "Candidate cannot reason about time or space complexity. Chooses naive data structures with no awareness of performance implications. Cannot explain Big-O notation or when to prefer one structure over another.",
+        "3": "Candidate correctly identifies the Big-O of their solution and can name a more efficient alternative. Understands when to use hash maps vs lists. Can discuss trade-offs at a surface level but requires prompting to apply optimisations proactively.",
+        "5": "Candidate proactively reasons about complexity before writing code. Selects optimal data structures without prompting, explains space-time trade-offs, handles edge cases (empty input, duplicates), and compares multiple algorithmic approaches by complexity and real-world performance."
+      }
+    },
+    "system_design": {
+      "description": "Evaluates component decoupling, scaling approaches, API interface boundary definition, and bottleneck identification.",
+      "anchors": {
+        "1": "Candidate cannot decompose a system into components. Describes a single-tier monolith with no awareness of scalability, API boundaries, or failure modes.",
+        "3": "Candidate identifies major components (API layer, database, cache) and describes a basic client-server model. Understands scaling conceptually but cannot design for specific load targets or identify remediation strategies for bottlenecks.",
+        "5": "Candidate designs a system with clear service boundaries, defines API contracts, reasons about data flow under load, identifies at least two bottlenecks with concrete mitigation strategies (read replicas, CDN, message queues), and addresses failure handling and recovery."
+      }
+    },
+    "debugging": {
+      "description": "Evaluates code navigation, root-cause isolation speed, and edge case correction patterns.",
+      "anchors": {
+        "1": "Candidate cannot systematically isolate a bug. Resorts to guessing or randomly changing values. Cannot explain what an error message means or where to start looking.",
+        "3": "Candidate uses a structured approach (reads the stack trace, narrows the scope). Can identify the bug with guidance but may fix the symptom rather than the root cause.",
+        "5": "Candidate immediately reads the error signal, traces execution flow, isolates the root cause without trial-and-error, explains why the bug exists, and identifies related edge cases that could trigger the same failure path."
+      }
+    },
+    "code_quality_reasoning": {
+      "description": "Evaluates clean code philosophy, readability choices, naming conventions, and structural maintainability reasoning.",
+      "anchors": {
+        "1": "Candidate writes code with poor naming, deep nesting, and no structural reasoning. Code may be functional but is unreadable and not maintainable.",
+        "3": "Candidate uses meaningful names and reasonable function decomposition. Can explain why they split code into functions. May not proactively consider maintainability but will improve if prompted.",
+        "5": "Candidate proactively applies clean code principles: self-documenting names, single-responsibility functions, avoids deep nesting, explains SOLID reasoning, considers how a future engineer would read the code, and discusses where comments add value vs where they are noise."
+      }
+    },
+    "langgraph_familiarity": {
+      "description": "Evaluates understanding of stateful multi-agent DAGs, conditional edge routing, loop boundaries, and memory persistence channels in LangGraph.",
+      "anchors": {
+        "1": "Candidate cannot distinguish LangGraph from standard LangChain. Has no awareness of what a StateGraph is or how nodes and edges differ from chain steps. Cannot explain what 'stateful' means in a pipeline context.",
+        "3": "Candidate understands that LangGraph uses nodes, edges, and a shared state object. Can describe a linear or branching DAG flow. Cannot confidently explain conditional edge routing, parallel fan-out, or how state is merged after parallel branches complete.",
+        "5": "Candidate can design a full multi-agent DAG: defines StateGraph nodes, wires conditional edges with routing functions, explains parallel fan-out and fan-in merge behaviour, describes how state channels accumulate updates across nodes, and can reason about error handling and loop termination conditions."
+      }
+    },
+    "rag_delivery_experience": {
+      "description": "Evaluates chunking strategies, vector embedding storage management, and contextual retrieval matching pipelines.",
+      "anchors": {
+        "1": "Candidate cannot explain what RAG stands for or why retrieval is used. Has no awareness of chunking, vector stores, or how embeddings relate to retrieval quality.",
+        "3": "Candidate understands the basic RAG loop: embed documents, store in a vector DB, embed the query, retrieve top-k chunks, pass to LLM. Can name a vector store (e.g. FAISS, Pinecone). Cannot reason about chunking strategy choices, re-ranking, or context window management.",
+        "5": "Candidate can design a complete RAG pipeline: explains chunk size and overlap trade-offs, describes embedding model selection rationale, discusses hybrid retrieval (dense + sparse), explains re-ranking, handles context window limits explicitly, and can articulate how retrieval quality directly affects generation quality."
+      }
+    },
+    "hallucination_handling": {
+      "description": "Evaluates guardrail implementation patterns, output validation strategies, evaluation criteria design, and safety system prompt techniques.",
+      "anchors": {
+        "1": "Candidate is unaware that LLMs hallucinate or has no strategy for detecting or mitigating it. Cannot describe any validation step before trusting LLM output.",
+        "3": "Candidate acknowledges hallucination as a risk and mentions one mitigation (e.g. system prompt instructions, output parsing). Cannot describe a structured evaluation loop or how to validate LLM responses programmatically.",
+        "5": "Candidate describes a multi-layer approach: structured output schemas to constrain the model, runtime output validators (e.g. Pydantic parsing), confidence-based fallback routing, ground-truth retrieval to anchor responses, and an evaluation harness for regression testing LLM behaviour. Can discuss prompt-level techniques (few-shot grounding, chain-of-thought verification)."
+      }
+    },
+    "quantization": {
+      "description": "Evaluates model compression understanding, FP16/INT8 weight optimization techniques, and memory footprint management.",
+      "anchors": {
+        "1": "Candidate does not know what quantization means in the context of ML models. Cannot explain why reducing precision matters or what the trade-off is.",
+        "3": "Candidate knows quantization reduces model size by lowering numerical precision (e.g. FP32 to INT8). Can name the benefit (memory and inference speed) and the risk (accuracy degradation). Cannot explain post-training quantization vs quantization-aware training or how to choose a quantization scheme.",
+        "5": "Candidate can explain FP16, BF16, INT8, and INT4 schemes, when each is appropriate, how to measure accuracy degradation after quantization, and how tools like bitsandbytes, GPTQ, or GGUF implement quantization. Can reason about deployment constraints (edge vs cloud) that drive quantization decisions."
+      }
+    },
+    "ml_fundamentals": {
+      "description": "Evaluates cross-validation, loss function optimization mechanics, regularization, and neural token attention math foundations.",
+      "anchors": {
+        "1": "Candidate cannot explain basic ML concepts like overfitting, bias-variance trade-off, or what a loss function measures. Answers are vague or circular (e.g. 'loss is how wrong the model is' with no further depth).",
+        "3": "Candidate correctly explains cross-validation, overfitting vs underfitting, and the purpose of regularization (L1/L2). Can describe gradient descent at a conceptual level. Cannot explain attention mechanism math or walk through backpropagation.",
+        "5": "Candidate demonstrates strong foundations: explains bias-variance decomposition, derives why L1 produces sparse weights, describes the attention mechanism (Q/K/V dot-product with softmax scaling), walks through backpropagation conceptually, and can reason about why specific architectural choices (e.g. layer norm placement, residual connections) help training stability."
+      }
+    }
   }
 }

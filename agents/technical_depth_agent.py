@@ -79,6 +79,8 @@ class TechnicalDepthAgent(BaseAgent):
         """
         Analyzes specialized engineering capabilities using custom compiled rubric files.
         Returns a full TechnicalDimensionReport with overall score and per-dimension breakdown.
+        Injects calibrated 1/3/5 scoring anchors into the system prompt so the LLM produces
+        consistent, comparable scores across all candidates.
 
         Returns:
             Tuple[TechnicalDimensionReport, token_metadata]
@@ -89,65 +91,96 @@ class TechnicalDepthAgent(BaseAgent):
 
         compiled_rubric = self._load_and_compile_rubric(role_type)
         dimensions = compiled_rubric.get("dimensions", {})
+        grading_note = compiled_rubric.get("grading_note", "")
 
         logger.info(f"Executing analytical technical depth evaluation for role payload tracker: {role_type}")
 
-        # Build explicit dimension instructions so the LLM knows exactly what to produce
-        dimension_instructions = "\n".join([
-            f"- {dim_name}: {dim_definition}"
-            for dim_name, dim_definition in dimensions.items()
-        ])
+        # Build dimension instructions — inject anchors if present, otherwise fall back to plain description
+        dimension_blocks = []
+        for dim_name, dim_value in dimensions.items():
+            if isinstance(dim_value, dict):
+                # Structured format: has description + anchors
+                description = dim_value.get("description", "")
+                anchors = dim_value.get("anchors", {})
+                anchor_text = ""
+                if anchors:
+                    anchor_text = (
+                        f"\n    Scoring anchors:"
+                        f"\n      Score 1: {anchors.get('1', 'No anchor defined.')}"
+                        f"\n      Score 3: {anchors.get('3', 'No anchor defined.')}"
+                        f"\n      Score 5: {anchors.get('5', 'No anchor defined.')}"
+                    )
+                dimension_blocks.append(f"[{dim_name}]\n  Definition: {description}{anchor_text}")
+            else:
+                # Legacy flat string format — plain description, no anchors
+                dimension_blocks.append(f"[{dim_name}]\n  Definition: {dim_value}")
+
+        dimension_instructions = "\n\n".join(dimension_blocks)
 
         system_prompt = (
             "You are an elite Principal Systems Architect and Lead Machine Learning Engineer.\n"
-            "Your mandate is to strictly evaluate the candidate's core domain competence against "
-            "a specific set of rubric dimensions based ONLY on explicit evidence in the provided "
-            "transcript and code submissions.\n\n"
-            f"RUBRIC DIMENSIONS TO EVALUATE:\n"
+            "Your mandate is to evaluate the candidate's core domain competence against a specific "
+            "set of rubric dimensions, based ONLY on explicit evidence found in the transcript and "
+            "code submissions provided below.\n\n"
+            "=== SCORING STANDARD ===\n"
+            "Each dimension includes calibrated scoring anchors that define what observable "
+            "candidate behaviour constitutes a 1 (poor), 3 (meets bar), and 5 (exceptional). "
+            "Use these anchors as your primary reference when assigning scores. "
+            "Interpolate for 2 and 4 — a 2 is below bar but not completely absent, "
+            "a 4 is above bar but not exemplary.\n\n"
+            + (f"=== ROLE-SPECIFIC GRADING NOTE ===\n{grading_note}\n\n" if grading_note else "")
+            + "=== RUBRIC DIMENSIONS ===\n"
             f"{dimension_instructions}\n\n"
-            "Evaluation Rules:\n"
-            "1. Include every single dimension listed above in your response — do not skip any.\n"
+            "=== EVALUATION RULES ===\n"
+            "1. Include EVERY dimension listed above in your response — do not skip any.\n"
             "2. For each dimension, check for explicit evidence across ALL THREE sources:\n"
             "   a) The candidate's spoken responses in the transcript\n"
-            "   b) The interviewer's questions or statements in the transcript\n"
+            "   b) The interviewer's questions or framing in the transcript\n"
             "   c) The candidate's submitted code (for code-related dimensions)\n"
-            "   NOTE: If the interviewer explicitly references MCQ performance covering a topic "
-            "(e.g. 'you scored 5/5 covering quantization, RAG, activation math'), that counts "
-            "as evidence for those dimensions — assess them based on MCQ context.\n"
-            "3. If explicit evidence EXISTS across any of the three sources:\n"
+            "   IMPORTANT: If the interviewer references MCQ performance on a topic "
+            "(e.g. 'you scored 5/5 covering quantization, RAG, activation math'), that is "
+            "valid evidence — assess those dimensions based on the MCQ reference.\n"
+            "3. When evidence EXISTS:\n"
             "   - Set not_assessed=false\n"
-            "   - Assign a score (1-5)\n"
-            "   - Write a single-sentence justification based on that evidence\n"
-            "   - Include a direct verbatim quote as evidence where possible\n"
-            "4. If NO evidence exists across any of the three sources:\n"
+            "   - Assign a score (1–5) using the anchors as your calibration standard\n"
+            "   - Write a single-sentence justification tied to specific observed behaviour\n"
+            "   - Include a direct verbatim quote from the transcript or code as evidence\n"
+            "4. When NO evidence exists across any source:\n"
             "   - Set not_assessed=true\n"
             "   - Set score=null\n"
             "   - Write a single-sentence justification stating the dimension was not covered\n"
             "   - Set evidence=null\n"
-            "5. CRITICAL: Never penalize a candidate for a dimension that was not assessed. "
-            "Absence of evidence is not evidence of weakness — it means the interview did not cover it.\n"
-            "6. After assessing all dimensions, provide an overall_score (1-5) based ONLY on the "
-            "dimensions that were actually assessed. Unassessed dimensions must not drag the score down.\n"
-            "7. Provide an overall_justification of exactly 2 sentences summarizing assessed performance.\n\n"
-            "You must return a structured response matching this exact schema:\n"
-            "- overall_score: Integer 1-5 holistic score across assessed dimensions only\n"
-            "- overall_justification: Exactly 2 sentences summarizing the technical assessment\n"
-            "- dimensions: A list of objects, one per rubric dimension, each containing:\n"
-            "  * dimension_name: The exact dimension key (e.g. 'langgraph_familiarity')\n"
-            "  * score: Integer 1-5 if assessed, null if not_assessed=true\n"
-            "  * justification: Single sentence rationale or reason for not assessing\n"
+            "5. CRITICAL: Never penalise a candidate for a dimension that was not covered. "
+            "Absence of evidence means the interview did not surface it — not that the "
+            "candidate lacks the skill.\n"
+            "6. Compute overall_score from assessed dimensions only. "
+            "Unassessed dimensions must not pull the score down.\n"
+            "7. Write overall_justification in exactly 2 sentences: "
+            "sentence 1 states the candidate's strongest demonstrated area, "
+            "sentence 2 identifies the most significant gap or the primary reason for the score.\n\n"
+            "=== OUTPUT SCHEMA ===\n"
+            "Return a structured response with:\n"
+            "- overall_score: Integer 1–5 holistic score across assessed dimensions only\n"
+            "- overall_justification: Exactly 2 sentences as described above\n"
+            "- dimensions: One object per rubric dimension, each with:\n"
+            "  * dimension_name: Exact dimension key (e.g. 'langgraph_familiarity')\n"
+            "  * score: Integer 1–5 if assessed, null if not_assessed=true\n"
+            "  * justification: Single sentence tied to specific observed behaviour\n"
             "  * evidence: Direct verbatim quote from transcript or code, or null\n"
-            "  * not_assessed: Boolean — true if dimension had no coverage in transcript or code"
+            "  * not_assessed: true if dimension had no coverage, false otherwise"
         )
 
         user_prompt = (
-            f"--- START CANDIDATE CODE REPOSITORY TRACKS ---\n"
-            f"[SUBMISSION CODE Q1]:\n{programming_answers[0]}\n\n"
-            f"[SUBMISSION CODE Q2]:\n{programming_answers[1]}\n"
-            f"--- END CANDIDATE CODE REPOSITORY TRACKS ---\n\n"
-            f"--- START CONVERSATIONAL TECHNICAL PANEL DIALOGUE BLOCK ---\n"
+            f"--- START CANDIDATE CODE SUBMISSIONS ---\n"
+            f"[CODE SUBMISSION Q1]:\n{programming_answers[0]}\n\n"
+            f"[CODE SUBMISSION Q2]:\n{programming_answers[1]}\n"
+            f"--- END CANDIDATE CODE SUBMISSIONS ---\n\n"
+            f"--- START TECHNICAL INTERVIEW TRANSCRIPT ---\n"
             f"{session1_transcript}\n"
-            f"--- END CONVERSATIONAL TECHNICAL PANEL DIALOGUE BLOCK ---"
+            f"--- END TECHNICAL INTERVIEW TRANSCRIPT ---\n\n"
+            "Now evaluate the candidate against every rubric dimension listed in the system prompt. "
+            "Use the scoring anchors to calibrate your scores. "
+            "Only reference evidence explicitly present in the transcript or code above."
         )
 
         eval_output, token_meta = self.call_llm_structured(
@@ -164,14 +197,15 @@ class TechnicalDepthAgent(BaseAgent):
                     "dimension_name": dim_name,
                     "score": 1,
                     "justification": "Evaluation failed — requires manual review.",
-                    "evidence": None
+                    "evidence": None,
+                    "not_assessed": False
                 }
                 for dim_name in dimensions.keys()
-            ] or [{"dimension_name": "technical_depth", "score": 1, "justification": "Evaluation failed.", "evidence": None}]
+            ] or [{"dimension_name": "technical_depth", "score": 1, "justification": "Evaluation failed.", "evidence": None, "not_assessed": False}]
 
             eval_output = TechnicalDimensionReport(
                 overall_score=1,
-                overall_justification="Technical depth evaluation was forced into baseline mitigation due to generation runtime failures. All dimension scores require manual auditing.",
+                overall_justification="Technical depth evaluation failed at runtime. All dimension scores require manual auditing.",
                 dimensions=fallback_dimensions
             )
 
