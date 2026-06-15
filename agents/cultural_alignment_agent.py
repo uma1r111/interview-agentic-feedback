@@ -47,7 +47,7 @@ class CulturalAlignmentAgent(BaseAgent):
             "- evidence: Extract a direct verbatim quote from the candidate's dialogue that explicitly showcases their behavioral positioning or handling of professional situations."
         )
 
-        user_prompt = f"Here is the Session 2 HR panel interview transcript dialogue stream to evaluate:\n\n{session2_transcript}"
+        user_prompt = f"Here is the preprocessed Q&A Session 2 HR panel interview transcript dialogue stream to evaluate:\n\n{session2_transcript}"
 
         # Execute structured LLM transaction forced to populate the EvalScore schema model
         eval_output, token_meta = self.call_llm_structured(

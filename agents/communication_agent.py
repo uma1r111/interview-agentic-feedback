@@ -37,7 +37,7 @@ class CommunicationAgent(BaseAgent):
             "- evidence: A direct word-for-word quote from the candidate's dialogue that supports your scoring."
         )
 
-        user_prompt = f"Here is the Session 1 interview transcript to analyze:\n\n{session1_transcript}"
+        user_prompt = f"Here is the preprocessed Q&A Session 1 interview transcript to analyze:\n\n{session1_transcript}"
 
         # Execute structured LLM call forced to populate the EvalScore schema model
         eval_output, token_meta = self.call_llm_structured(

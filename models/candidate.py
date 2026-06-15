@@ -22,6 +22,8 @@ class InterviewState(TypedDict, total=False):
     programming_answers: List[str]
     session1_transcript: str
     session2_transcript: str
+    clean_session1: str
+    clean_session2: str
     mcq_responses: Optional[Dict[str, str]]
     interviewer_bias_flags: Optional[List]
     communication_score: Optional[EvalScore]

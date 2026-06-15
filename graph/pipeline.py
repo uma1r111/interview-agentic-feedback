@@ -11,6 +11,7 @@ from agents.cultural_alignment_agent import CulturalAlignmentAgent
 from agents.bias_detection_agent import BiasDetectionAgent
 from agents.feedback_compiler_agent import FeedbackCompilerAgent
 from agents.cv_parsing_agent import CVParsingAgent
+from services.transcript_preprocessor import TranscriptPreprocessor
 
 logger = logging.getLogger("InterviewPipeline")
 
@@ -61,6 +62,17 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "error": None
     }
 
+def preprocess_transcript_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Cleans raw diarized transcripts into structured Q&A pairs to reduce noise."""
+    logger.info("--- START NODE: TRANSCRIPT PREPROCESSOR ---")
+    preprocessor = TranscriptPreprocessor()
+    clean_s1 = preprocessor.process(state.get("session1_transcript", ""))
+    clean_s2 = preprocessor.process(state.get("session2_transcript", ""))
+    return {
+        "clean_session1": clean_s1,
+        "clean_session2": clean_s2
+    }
+
 def transcript_bias_screen_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Lightweight rule-based pre-screen of interviewer turns in both session transcripts.
@@ -92,7 +104,7 @@ def communication_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates text-based dialogue dynamics inside Session 1."""
     logger.info("--- START NODE: COMMUNICATION EVALUATOR ---")
     agent = CommunicationAgent()
-    score, _ = agent.evaluate_communication(state.get("session1_transcript", ""))
+    score, _ = agent.evaluate_communication(state.get("clean_session1", ""))
     return {"communication_score": score}
 
 
@@ -102,7 +114,7 @@ def technical_depth_node(state: Dict[str, Any]) -> Dict[str, Any]:
     agent = TechnicalDepthAgent()
     score, _ = agent.evaluate_technical_depth(
         role_type=state.get("role_type"),
-        session1_transcript=state.get("session1_transcript", ""),
+        session1_transcript=state.get("clean_session1", ""),
         programming_answers=state.get("programming_answers", ["", ""])
     )
     return {"technical_score": score}
@@ -112,7 +124,7 @@ def problem_solving_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates conceptual mapping and structural breakdown behaviors."""
     logger.info("--- START NODE: PROBLEM SOLVING EVALUATOR ---")
     agent = ProblemSolvingAgent()
-    score, _ = agent.evaluate_problem_solving(state.get("session1_transcript", ""))
+    score, _ = agent.evaluate_problem_solving(state.get("clean_session1", ""))
     return {"problem_solving_score": score}
 
 
@@ -120,7 +132,7 @@ def cultural_alignment_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates team motivation and values markers strictly from Session 2."""
     logger.info("--- START NODE: CULTURAL ALIGNMENT EVALUATOR ---")
     agent = CulturalAlignmentAgent()
-    score, _ = agent.evaluate_cultural_alignment(state.get("session2_transcript", ""))
+    score, _ = agent.evaluate_cultural_alignment(state.get("clean_session2", ""))
     return {"cultural_score": score}
 
 
@@ -235,6 +247,7 @@ def create_interview_graph():
 
     # Register all nodes
     builder.add_node("ingest",                   ingestion_node)
+    builder.add_node("preprocess_transcripts",   preprocess_transcript_node)
     builder.add_node("screen_transcript_bias",      transcript_bias_screen_node)
     builder.add_node("evaluate_communication",   communication_node)
     builder.add_node("evaluate_technical",       technical_depth_node)
@@ -247,15 +260,17 @@ def create_interview_graph():
     # Entry point
     builder.add_edge(START, "ingest")
 
-    # Conditional edge: abort on ingestion error, otherwise go to transcript screener
+    # Conditional edge: abort on ingestion error, otherwise go to preprocessor
     builder.add_conditional_edges(
         "ingest",
         route_after_ingestion,
         {
             "abort_pipeline": END,
-            "continue":       "screen_transcript_bias"
+            "continue":       "preprocess_transcripts"
         }
     )
+
+    builder.add_edge("preprocess_transcripts", "screen_transcript_bias")
 
     # Transcript screener runs synchronously before parallel fan-out
     # Soft warning only — pipeline always continues from here

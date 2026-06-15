@@ -46,7 +46,7 @@ class ProblemSolvingAgent(BaseAgent):
             "- evidence: Extract a direct verbatim quote from the candidate's dialogue that explicitly showcases their reasoning or edge-case handling."
         )
 
-        user_prompt = f"Here is the Session 1 interview transcript dialogue stream to evaluate:\n\n{session1_transcript}"
+        user_prompt = f"Here is the preprocessed Q&A Session 1 interview transcript dialogue stream to evaluate:\n\n{session1_transcript}"
 
         # Execute structured LLM transaction forced to populate the EvalScore schema model
         eval_output, token_meta = self.call_llm_structured(
