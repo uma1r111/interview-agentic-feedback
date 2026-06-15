@@ -228,6 +228,30 @@ if candidate_id_to_load:
 
         st.markdown("---")
 
+        # ==============================================================================
+        # Interviewer Bias Flags Warning Block
+        # ==============================================================================
+        bias_flags = report.get("interviewer_bias_flags")
+        if bias_flags:
+            st.markdown("### ⚠️ Interviewer Bias Pre-Screen Alerts")
+            st.error(
+                f"**{len(bias_flags)} biased interviewer question(s) detected** in the transcript "
+                f"pre-screen. These questions may have influenced the candidate's responses. "
+                f"Scores have NOT been adjusted — review these flags before committing a hiring decision."
+            )
+            for flag in bias_flags:
+                severity_icon = "🔴" if flag["severity"] == "high" else "🟡"
+                with st.expander(
+                    f"{severity_icon} [{flag['severity'].upper()}] {flag['bias_category'].replace('_', ' ').title()}",
+                    expanded=True
+                ):
+                    st.markdown(f"**Question:** {flag['question_text']}")
+                    st.caption(f"**Rationale:** {flag['rationale']}")
+        else:
+            st.success("✅ Interviewer Bias Pre-Screen: No biased questions detected in either session transcript.")
+
+        st.markdown("---")
+
         st.markdown("### 🧠 AI Core Synthesis Summaries")
         synth_col1, synth_col2 = st.columns(2)
         with synth_col1:

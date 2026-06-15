@@ -9,6 +9,13 @@ class EvalScore(BaseModel):
     justification: str = Field(..., description="A crisp, 2-sentence rationale outlining the score assignment")
     evidence: Optional[str] = Field(None, description="Direct word-for-word quotes or raw logic extracted from transcripts or test answers")
 
+class InterviewerBiasFlag(BaseModel):
+    """Represents a single detected biased question from an interviewer turn."""
+    question_text: str = Field(..., description="The exact interviewer question or statement flagged")
+    bias_category: str = Field(..., description="Category of protected characteristic detected (e.g. 'family_status', 'religion', 'nationality')")
+    severity: str = Field(..., description="'high' for explicit protected characteristic questions, 'medium' for ambiguous indicators")
+    rationale: str = Field(..., description="Brief explanation of why this was flagged")
+
 class DimensionScore(BaseModel):
     """Per-rubric-dimension evaluation score produced by the Technical Depth Agent."""
     dimension_name: str = Field(..., description="The rubric dimension being evaluated (e.g. 'langgraph_familiarity')")
@@ -135,3 +142,7 @@ class FeedbackReport(BaseModel):
     ai_recommendation: Recommendation
     ai_justification: str = Field(..., description="A descriptive single-sentence justification backing the recommendation")
     hiring_manager_decision: Decision = Field(default=Decision.HOLD, description="Submission slot restricted to the manager")
+    interviewer_bias_flags: Optional[List[InterviewerBiasFlag]] = Field(
+    default=None,
+    description="Detected biased interviewer questions from transcript pre-screening. None means no flags raised."
+)

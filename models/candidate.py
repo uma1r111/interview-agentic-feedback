@@ -23,6 +23,7 @@ class InterviewState(TypedDict, total=False):
     session1_transcript: str
     session2_transcript: str
     mcq_responses: Optional[Dict[str, str]]
+    interviewer_bias_flags: Optional[List]
     communication_score: Optional[EvalScore]
     technical_score: Optional[TechnicalDimensionReport]      # CHANGED from Optional[EvalScore]
     problem_solving_score: Optional[EvalScore]

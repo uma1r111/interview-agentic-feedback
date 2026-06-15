@@ -60,6 +60,32 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "error": None
     }
 
+def transcript_bias_screen_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Lightweight rule-based pre-screen of interviewer turns in both session transcripts.
+    Runs after ingestion and before parallel evaluation agents.
+    Does not make LLM calls — purely pattern-based.
+    Flags are soft warnings — pipeline continues regardless of findings.
+    """
+    logger.info("--- START NODE: TRANSCRIPT BIAS SCREENER ---")
+
+    from services.transcript_screener import TranscriptScreener
+
+    screener = TranscriptScreener()
+    flags = screener.screen(
+        session1_transcript=state.get("session1_transcript", ""),
+        session2_transcript=state.get("session2_transcript", "")
+    )
+
+    if flags:
+        logger.warning(
+            f"TranscriptBiasScreener: {len(flags)} interviewer bias flag(s) detected. "
+            f"Pipeline continues — flags will be surfaced in FeedbackReport."
+        )
+    else:
+        logger.info("TranscriptBiasScreener: Transcripts cleared. No interviewer bias detected.")
+
+    return {"interviewer_bias_flags": flags if flags else []}
 
 def communication_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Evaluates text-based dialogue dynamics inside Session 1."""
@@ -164,7 +190,8 @@ def feedback_compiler_node(state: Dict[str, Any]) -> Dict[str, Any]:
         problem_solving=state.get("problem_solving_score"),
         cultural=state.get("cultural_score"),
         bias_clear=state.get("bias_clear", False),
-        cv_experience_match=cv_match
+        cv_experience_match=cv_match,
+        interviewer_bias_flags=state.get("interviewer_bias_flags", [])    # ADD THIS
     )
 
     # Attach cv_experience_match to the report for persistence and dashboard rendering
@@ -207,6 +234,7 @@ def create_interview_graph():
 
     # Register all nodes
     builder.add_node("ingest",                   ingestion_node)
+    builder.add_node("screen_transcript_bias",      transcript_bias_screen_node)
     builder.add_node("evaluate_communication",   communication_node)
     builder.add_node("evaluate_technical",       technical_depth_node)
     builder.add_node("evaluate_problem_solving", problem_solving_node)
@@ -218,22 +246,23 @@ def create_interview_graph():
     # Entry point
     builder.add_edge(START, "ingest")
 
-    # Conditional edge: abort on ingestion error, otherwise route to communication
-    # (communication is the trigger node — remaining parallel nodes use direct edges below)
+    # Conditional edge: abort on ingestion error, otherwise go to transcript screener
     builder.add_conditional_edges(
         "ingest",
         route_after_ingestion,
         {
             "abort_pipeline": END,
-            "continue":       "evaluate_communication"
+            "continue":       "screen_transcript_bias"
         }
     )
 
-    # Parallel fan-out via direct edges — LangGraph executes all concurrently
-    builder.add_edge("ingest", "evaluate_technical")
-    builder.add_edge("ingest", "evaluate_problem_solving")
-    builder.add_edge("ingest", "evaluate_cultural")
-    builder.add_edge("ingest", "parse_cv")
+    # Transcript screener runs synchronously before parallel fan-out
+    # Soft warning only — pipeline always continues from here
+    builder.add_edge("screen_transcript_bias", "evaluate_communication")
+    builder.add_edge("screen_transcript_bias", "evaluate_technical")
+    builder.add_edge("screen_transcript_bias", "evaluate_problem_solving")
+    builder.add_edge("screen_transcript_bias", "evaluate_cultural")
+    builder.add_edge("screen_transcript_bias", "parse_cv")
 
     # Fan-in — all 5 parallel nodes must complete before bias gate fires
     builder.add_edge(

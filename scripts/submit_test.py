@@ -13,7 +13,7 @@ import sys
 import requests
 
 API_URL      = "http://127.0.0.1:8000/candidates"
-DEFAULT_CV   = "fixtures/sample_cv.pdf"
+DEFAULT_CV   = "fixtures/Shaikh M. Umair - Resume.pdf"
 
 MOCK_MCQ_ANSWERS = {
     "q1_decision_trees":       "A",
@@ -97,6 +97,6 @@ def send_candidate_to_pipeline(fixture_path: str, cv_pdf_path: str):
 
 
 if __name__ == "__main__":
-    fixture = sys.argv[1] if len(sys.argv) > 1 else "fixtures/sample_ai_strong.json"
+    fixture = sys.argv[1] if len(sys.argv) > 1 else "fixtures/sample_candidate.json"
     cv_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_CV
     send_candidate_to_pipeline(fixture, cv_path)

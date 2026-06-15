@@ -27,6 +27,7 @@ class FeedbackCompilerAgent(BaseAgent):
         problem_solving: EvalScore,
         cultural: EvalScore,
         bias_clear: bool,
+        interviewer_bias_flags: List = None,
         cv_experience_match: Optional[ExperienceMatchSummary] = None
     ) -> Tuple[FeedbackReport, Dict[str, int]]:
         """
@@ -89,11 +90,11 @@ class FeedbackCompilerAgent(BaseAgent):
             "and exactly 2 to 3 for concerns. Draw from technical dimension scores, communication quality, "
             "problem solving indicators, and cultural alignment signals.\n"
             "5. Dynamic Recommendation: Formulate a final holistic 'ai_recommendation' enum value ('Strong Yes', 'Yes', 'Maybe', 'No') "
-            "and a single-sentence 'ai_justification'. Factor in all interview dimensions as the primary signals.\n"
-            "   - CV vs. Interview Validation: If the CV lists a skill as 'missing' under required_skills_missing, "
-            "but the candidate demonstrated strong, accurate knowledge of that exact skill in the interview feeds "
-            "(e.g., they got a high score like 4 or 5 on a corresponding technical dimension like langgraph_familiarity or rag_delivery_experience), "
-            "treat the skill as validated. Do not list that skill as a concern, and do not penalize their final 'ai_recommendation' for it.\n"
+            "and a single-sentence 'ai_justification'. Factor in all dimensions — a candidate with high overall scores "
+            "but weak dimension-level gaps (e.g. low hallucination_handling for an AI role) should be weighted accordingly.\n"
+            "6. Interviewer Bias Flags: If bias flags are present in the input, you MUST include at least one concern "
+            "bullet noting that the evaluation may have been influenced by biased interviewer questions. "
+            "Do NOT adjust the candidate's scores based on the flags — only note the evaluation quality risk.\n\n"
             "   - Weighting Signal (CV Fit): If a CV Experience Match block is provided, use it as a secondary, minor weighting signal. "
             "Specifically, if the candidate has flawless or outstanding interview scores (e.g., scoring 4/5 or 5/5 across all evaluated dimensions), "
             "their technical competency is proven. In this case, you MUST recommend them as 'Yes' or 'Strong Yes'. "
@@ -118,11 +119,29 @@ class FeedbackCompilerAgent(BaseAgent):
             "- hiring_manager_decision: Default to 'Hold'"
         )
 
+        # Serialize interviewer bias flags if present
+        if interviewer_bias_flags:
+            flags_block = "\n--- START INTERVIEWER BIAS FLAGS ---\n"
+            flags_block += (
+                f"WARNING: {len(interviewer_bias_flags)} biased interviewer question(s) "
+                f"were detected in the transcript pre-screen. These questions may have "
+                f"influenced the candidate's responses and should be factored into your "
+                f"assessment of the evaluation quality.\n\n"
+            )
+            for flag in interviewer_bias_flags:
+                flags_block += (
+                    f"  [{flag.severity.upper()}] Category: {flag.bias_category}\n"
+                    f"  Question: {flag.question_text}\n"
+                    f"  Rationale: {flag.rationale}\n\n"
+                )
+            flags_block += "--- END INTERVIEWER BIAS FLAGS ---\n"
+        else:
+            flags_block = "\n--- INTERVIEWER BIAS FLAGS: None detected. Transcripts cleared. ---\n"
+
         user_prompt = (
             f"Candidate: {candidate_name}\n"
             f"Target Role: {role_type.value}\n"
             f"Programmatic MCQ Score: {mcq_score}/5.0\n\n"
-            f"{cv_block}"
             f"--- START CODE INPUTS ---\n"
             f"Q1 Code: {programming_answers[0]}\n"
             f"Q2 Code: {programming_answers[1]}\n"
@@ -133,6 +152,7 @@ class FeedbackCompilerAgent(BaseAgent):
             f"[Problem Solving Evaluator]: Score={problem_solving.score} | Justification={problem_solving.justification}\n\n"
             f"[Cultural Alignment Evaluator]: Score={cultural.score} | Justification={cultural.justification}\n"
             f"--- END AGENT METRIC FEEDS ---"
+            f"{flags_block}"
         )
 
         # 2. Invoke structured model compilation
