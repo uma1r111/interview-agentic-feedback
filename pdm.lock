@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:b4897bb3ebf91756d9041fad612c9fa31e2880537dd2763fc5d1196b7e3e6afb"
+content_hash = "sha256:cce0862552c93414629042e76fe77fd10a8b3cf62350a71a23f116abb564aaa5"
 
 [[metadata.targets]]
 requires_python = "==3.11.*"
@@ -999,6 +999,22 @@ files = [
     {file = "pydantic_core-2.46.4-pp311-pypy311_pp73-musllinux_1_1_x86_64.whl", hash = "sha256:86e1a4418c6cd97d60c95c71164158eaf7324fae7b0923264016baa993eba6fc"},
     {file = "pydantic_core-2.46.4-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:d51026d73fcfd93610abc7b27789c26b313920fcfb20e27462d74a7f8b06e983"},
     {file = "pydantic_core-2.46.4.tar.gz", hash = "sha256:62f875393d7f270851f20523dd2e29f082bcc82292d66db2b64ea71f64b6e1c1"},
+]
+
+[[package]]
+name = "pydantic-settings"
+version = "2.14.1"
+requires_python = ">=3.10"
+summary = "Settings management using Pydantic"
+groups = ["default"]
+dependencies = [
+    "pydantic>=2.7.0",
+    "python-dotenv>=0.21.0",
+    "typing-inspection>=0.4.0",
+]
+files = [
+    {file = "pydantic_settings-2.14.1-py3-none-any.whl", hash = "sha256:6e3c7edfd8277687cdc598f56e5cff0e9bfff0910a3749deaa8d4401c3a2b9de"},
+    {file = "pydantic_settings-2.14.1.tar.gz", hash = "sha256:e874d3bec7e787b0c9958277956ed9b4dd5de6a80e162188fdaff7c5e26fd5fa"},
 ]
 
 [[package]]

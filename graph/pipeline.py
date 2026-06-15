@@ -57,6 +57,7 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "programming_answers": updated_state.get("programming_answers"),
         "session1_transcript": updated_state.get("session1_transcript"),
         "session2_transcript": updated_state.get("session2_transcript"),
+        "mcq_responses":       None,   # P1-05: drop raw MCQ selections after ingestion consumes them
         "error": None
     }
 
