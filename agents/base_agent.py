@@ -59,11 +59,20 @@ class BaseAgent:
             parsed_output = response.get("parsed")
             raw_message = response.get("raw")
 
-            if raw_message and hasattr(raw_message, "response_metadata"):
-                usage = raw_message.response_metadata.get("token_usage", {})
-                token_metadata["prompt_tokens"] = usage.get("prompt_tokens", 0)
-                token_metadata["completion_tokens"] = usage.get("completion_tokens", 0)
-                token_metadata["total_tokens"] = usage.get("total_tokens", 0)
+            if raw_message:
+                # Primary path: usage_metadata on AIMessage (LangChain structured output)
+                usage_meta = getattr(raw_message, "usage_metadata", None)
+                if usage_meta:
+                    token_metadata["prompt_tokens"] = usage_meta.get("input_tokens", 0)
+                    token_metadata["completion_tokens"] = usage_meta.get("output_tokens", 0)
+                    token_metadata["total_tokens"] = usage_meta.get("total_tokens", 0)
+                else:
+                    # Fallback: some LangChain versions still populate response_metadata
+                    resp_meta = getattr(raw_message, "response_metadata", {})
+                    usage = resp_meta.get("token_usage", {})
+                    token_metadata["prompt_tokens"] = usage.get("prompt_tokens", 0)
+                    token_metadata["completion_tokens"] = usage.get("completion_tokens", 0)
+                    token_metadata["total_tokens"] = usage.get("total_tokens", 0)
 
             parsing_error = response.get("parsing_error")
             if parsing_error:
