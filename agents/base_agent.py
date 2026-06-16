@@ -4,6 +4,8 @@ from typing import Optional, Tuple, Type, TypeVar
 from pydantic import BaseModel
 from langchain_openai import AzureChatOpenAI
 
+import warnings
+
 from config.settings import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -54,7 +56,18 @@ class BaseAgent:
                 ("user", user_prompt)
             ]
 
-            response = structured_llm.invoke(messages)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=".*PydanticSerializationUnexpectedValue.*",
+                    category=UserWarning
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message=".*Expected.*got.*",
+                    category=UserWarning
+                )
+                response = structured_llm.invoke(messages)
 
             parsed_output = response.get("parsed")
             raw_message = response.get("raw")
