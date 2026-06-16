@@ -2,3 +2,4 @@
 **/__pycache__
 *.db
 fixtures/*.pdf
+fixtures/candidates/

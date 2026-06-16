@@ -38,7 +38,7 @@ def init_database() -> None:
     Safe to call on every startup — uses CREATE TABLE IF NOT EXISTS.
     """
     with get_db_connection() as conn:
-        # Core candidates table
+        # Core candidates table (stores fully evaluated candidates)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS candidates (
                 candidate_id        TEXT PRIMARY KEY,
@@ -66,9 +66,254 @@ def init_database() -> None:
             )
         """)
 
+        # Intake staging table — tracks candidates from registration through evaluation
+        # status lifecycle: 'awaiting_files' → 'ready' → 'evaluated'
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS candidate_intake (
+                candidate_id            TEXT PRIMARY KEY,
+                candidate_name          TEXT NOT NULL,
+                role_type               TEXT NOT NULL,
+                mcq_path                TEXT,
+                programming_path        TEXT,
+                cv_path                 TEXT,
+                session1_path           TEXT,
+                session2_path           TEXT,
+                status                  TEXT NOT NULL DEFAULT 'awaiting_files',
+                created_at              TEXT NOT NULL,
+                evaluated_at            TEXT
+            )
+        """)
+
+        # Migrations: add new columns for DBs created before schema changes
+        for migration_sql in [
+            "ALTER TABLE candidate_intake ADD COLUMN mcq_path TEXT",
+            "ALTER TABLE candidate_intake ADD COLUMN programming_path TEXT",
+        ]:
+            try:
+                conn.execute(migration_sql)
+                conn.commit()
+                logger.info(f"Migration applied: {migration_sql[:60]}")
+            except Exception:
+                pass  # Column already exists — safe to ignore
+
+        # Status repair: reset any 'ready' rows that are missing required paths
+        # (these were created under the old schema before path-based storage)
+        repair = conn.execute("""
+            UPDATE candidate_intake
+            SET status = 'awaiting_files'
+            WHERE status = 'ready'
+              AND (mcq_path IS NULL OR programming_path IS NULL
+                   OR cv_path IS NULL OR session1_path IS NULL OR session2_path IS NULL)
+        """)
+        conn.commit()
+        if repair.rowcount > 0:
+            logger.warning(
+                f"Status repair: reset {repair.rowcount} stale 'ready' record(s) to "
+                "'awaiting_files' due to missing file paths (schema migration artefact)."
+            )
+
         conn.commit()
 
     logger.info("Database initialized. All tables verified.")
+
+
+# ==============================================================================
+# Intake Write Operations
+# ==============================================================================
+
+def create_candidate_intake(candidate_id: str, candidate_name: str, role_type: str) -> None:
+    """
+    Phase 1: Registers a new candidate stub immediately after Step 1 form submission.
+    Sets status to 'awaiting_files' — no files or scores yet.
+    Also creates the candidate's folder under fixtures/candidates/.
+    """
+    import os
+    folder_path = os.path.join("fixtures", "candidates", candidate_id)
+    os.makedirs(folder_path, exist_ok=True)
+    logger.info(f"Created candidate folder: {folder_path}")
+
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    with get_db_connection() as conn:
+        conn.execute("""
+            INSERT INTO candidate_intake
+                (candidate_id, candidate_name, role_type, status, created_at)
+            VALUES (?, ?, ?, 'awaiting_files', ?)
+        """, (candidate_id, candidate_name, role_type, created_at))
+        conn.commit()
+
+    logger.info(f"Candidate intake record created: {candidate_id} ({candidate_name}, {role_type})")
+
+
+def update_candidate_intake_files(
+    candidate_id: str,
+    mcq_score: float,
+    mcq_selections: str,
+    programming_answer_1: str,
+    programming_answer_2: str,
+    cv_path: str,
+    session1_path: str,
+    session2_path: str,
+) -> None:
+    """
+    Phase 2: Updates all file paths and scores after Step 2 upload.
+    Sets status to 'ready' when all required fields are present.
+    """
+    with get_db_connection() as conn:
+        conn.execute("""
+            UPDATE candidate_intake SET
+                mcq_score            = ?,
+                mcq_selections       = ?,
+                programming_answer_1 = ?,
+                programming_answer_2 = ?,
+                cv_path              = ?,
+                session1_path        = ?,
+                session2_path        = ?,
+                status               = 'ready'
+            WHERE candidate_id = ?
+        """, (
+            mcq_score,
+            mcq_selections,
+            programming_answer_1,
+            programming_answer_2,
+            cv_path,
+            session1_path,
+            session2_path,
+            candidate_id
+        ))
+        conn.commit()
+
+    logger.info(f"Candidate intake files updated: {candidate_id} → status=ready")
+
+
+def mark_intake_evaluated(candidate_id: str) -> None:
+    """Marks a candidate's intake record as 'evaluated' after the pipeline completes."""
+    with get_db_connection() as conn:
+        conn.execute("""
+            UPDATE candidate_intake
+            SET status = 'evaluated', evaluated_at = ?
+            WHERE candidate_id = ?
+        """, (datetime.now(timezone.utc).isoformat(), candidate_id))
+        conn.commit()
+
+    logger.info(f"Candidate intake marked as evaluated: {candidate_id}")
+
+
+def delete_intake_candidate(candidate_id: str) -> bool:
+    """
+    Hard-deletes a candidate_intake row by ID.
+
+    Only intended for candidates in 'awaiting_files' status.
+    Returns True if a row was deleted, False if no row matched.
+    The caller is responsible for removing the fixtures folder.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM candidate_intake WHERE candidate_id = ?",
+            (candidate_id,)
+        )
+        conn.commit()
+        deleted = cursor.rowcount > 0
+
+    if deleted:
+        logger.info(f"Intake record deleted: {candidate_id}")
+    else:
+        logger.warning(f"Delete attempted but no record found: {candidate_id}")
+    return deleted
+
+
+def patch_intake_candidate(candidate_id: str, **fields) -> None:
+    """
+    Partially updates a candidate_intake row with only the supplied keyword args.
+    Automatically recalculates status:
+      - 'ready'          if all 6 required fields are now non-null
+      - 'awaiting_files' otherwise
+
+    Supported field names (all map to DB columns):
+      mcq_path, programming_path, cv_path, session1_path, session2_path
+    """
+    REQUIRED_FIELDS = (
+        "mcq_path", "programming_path",
+        "cv_path", "session1_path", "session2_path"
+    )
+    ALLOWED = set(REQUIRED_FIELDS)
+    filtered = {k: v for k, v in fields.items() if k in ALLOWED and v is not None}
+    if not filtered:
+        return
+
+    set_clauses = ", ".join(f"{col} = ?" for col in filtered)
+    values = list(filtered.values()) + [candidate_id]
+
+    with get_db_connection() as conn:
+        conn.execute(
+            f"UPDATE candidate_intake SET {set_clauses} WHERE candidate_id = ?",
+            values
+        )
+        conn.commit()
+
+        # Re-fetch to determine new completeness
+        row = conn.execute(
+            f"SELECT {', '.join(REQUIRED_FIELDS)} FROM candidate_intake WHERE candidate_id = ?",
+            (candidate_id,)
+        ).fetchone()
+        if row and all(row[f] is not None for f in REQUIRED_FIELDS):
+            conn.execute(
+                "UPDATE candidate_intake SET status = 'ready' WHERE candidate_id = ?",
+                (candidate_id,)
+            )
+            conn.commit()
+            logger.info(f"Intake {candidate_id} → all fields complete, status=ready")
+        else:
+            conn.execute(
+                "UPDATE candidate_intake SET status = 'awaiting_files' WHERE candidate_id = ?",
+                (candidate_id,)
+            )
+            conn.commit()
+
+    logger.info(f"Intake patched: {candidate_id} | fields updated: {list(filtered.keys())}")
+
+
+# ==============================================================================
+# Intake Read Operations
+# ==============================================================================
+
+def get_all_intake_candidates() -> List[Dict[str, Any]]:
+    """Returns all intake rows ordered by creation time (newest first)."""
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT candidate_id, candidate_name, role_type,
+                   mcq_path, programming_path,
+                   cv_path, session1_path, session2_path,
+                   status, created_at, evaluated_at
+            FROM candidate_intake
+            ORDER BY created_at DESC
+        """).fetchall()
+    return [dict(row) for row in rows]
+
+
+def find_intake_by_name(candidate_name: str) -> List[Dict[str, Any]]:
+    """
+    Returns all intake rows whose candidate_name matches (case-insensitive).
+    Used for duplicate-name detection before creating a new intake record.
+    """
+    with get_db_connection() as conn:
+        rows = conn.execute("""
+            SELECT candidate_id, candidate_name, role_type, status, created_at
+            FROM candidate_intake
+            WHERE LOWER(candidate_name) = LOWER(?)
+        """, (candidate_name.strip(),)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_intake_candidate(candidate_id: str) -> Optional[Dict[str, Any]]:
+    """Fetches a single intake record by ID. Returns None if not found."""
+    with get_db_connection() as conn:
+        row = conn.execute("""
+            SELECT *
+            FROM candidate_intake
+            WHERE candidate_id = ?
+        """, (candidate_id,)).fetchone()
+    return dict(row) if row else None
 
 
 # ==============================================================================

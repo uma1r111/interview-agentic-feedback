@@ -2,7 +2,6 @@ import uuid
 import logging
 from typing import Dict, Any, Tuple
 from models.candidate import CandidateBundle
-from services.test_processor import TestProcessorService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("IngestionAgent")
@@ -10,12 +9,15 @@ logger = logging.getLogger("IngestionAgent")
 
 class IngestionAgent:
     """
-    Validates unstructured application payload entries, utilizes the programmatic
-    test processor to evaluate metrics, and instantiates the graph state dictionary.
+    Validates the candidate payload bundle and instantiates the global pipeline state.
+
+    In the new file-based intake system, MCQ and programming answers are uploaded as raw
+    documents and evaluated by dedicated checker agents later in the pipeline.
+    This agent no longer performs any scoring — it only validates the bundle structure
+    and builds the initial state dict.
     """
     def __init__(self):
-        self.test_processor = TestProcessorService()
-        logger.info("Ingestion Agent successfully initialized with TestProcessorService dependency.")
+        logger.info("Ingestion Agent initialized.")
 
     def process_intake(self, raw_payload: Dict[str, Any], mcq_responses: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
         logger.info("Initiating structural intake validation for candidate payload...")
@@ -24,20 +26,7 @@ class IngestionAgent:
 
             validated_bundle = CandidateBundle(**data_to_validate)
 
-            # Direct call to TestProcessorService using the correct method signature.
-            # role_type.value converts the RoleType enum to its string form so the
-            # answer key registry lookup resolves correctly.
-            test_result = self.test_processor.score_test_intake(
-                role_type=validated_bundle.role_type.value,
-                candidate_mcq_responses=mcq_responses,
-                raw_programming_answers=validated_bundle.programming_answers
-            )
-            scored_mcq = test_result.mcq_score_out_of_five
-            logger.info(f"MCQ programmatic scoring complete. Normalized score: {scored_mcq}/5.0")
-
-            # P0-01 FIX: Append a UUID suffix to prevent candidate ID collisions.
-            # Two candidates with the same name now get distinct IDs instead of
-            # silently overwriting each other in the database.
+            # Generate a unique candidate ID (collision-safe UUID suffix)
             name_slug = validated_bundle.candidate_name.lower().replace(" ", "_")
             unique_suffix = str(uuid.uuid4())[:8]
             candidate_id = f"cand_{name_slug}_{unique_suffix}"
@@ -47,11 +36,12 @@ class IngestionAgent:
                 "candidate_name":      validated_bundle.candidate_name,
                 "role_type":           validated_bundle.role_type,
                 "raw_cv":              validated_bundle.raw_cv,
-                "mcq_score":           scored_mcq,
+                "mcq_score":           validated_bundle.mcq_score,   # 0.0 placeholder — MCQ Agent will score
                 "programming_answers": validated_bundle.programming_answers,
                 "session1_transcript": validated_bundle.session1_transcript,
-                "session2_transcript": validated_bundle.session2_transcript
+                "session2_transcript": validated_bundle.session2_transcript,
             }
+            logger.info(f"Intake validated. candidate_id={candidate_id} | role={validated_bundle.role_type}")
             return output_state, True
 
         except Exception as validation_err:
