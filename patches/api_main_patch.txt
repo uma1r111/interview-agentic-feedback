@@ -1,0 +1,32 @@
+APPLY THESE TWO CHANGES TO api/main.py
+========================================
+
+CHANGE 1 — Add the import alongside the other service imports near the top
+of the file (next to the existing "from services.database import ..."
+and "from services.pdf_extractor import PDFExtractorService" lines):
+
+    from services.auth import init_users_table
+
+CHANGE 2 — Find this block:
+
+    @app.on_event("startup")
+    def on_startup():
+        init_database()
+
+Replace it with:
+
+    @app.on_event("startup")
+    def on_startup():
+        init_database()
+        init_users_table()
+
+That's the only change needed in api/main.py for this step. The users
+table will now be created automatically every time the FastAPI server
+starts, exactly like the candidates/intake tables already are.
+
+Note: dashboard/app.py does NOT need this change. The Streamlit app calls
+init_users_table() itself via dashboard/auth_ui.py's require_login(), since
+Streamlit has no startup hook equivalent to FastAPI's on_event("startup").
+Both the API server and the dashboard can safely call init_users_table()
+independently — it's CREATE TABLE IF NOT EXISTS, so whichever process
+starts first creates the table and the other is a no-op.
