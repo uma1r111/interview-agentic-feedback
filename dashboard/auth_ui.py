@@ -53,10 +53,26 @@ def inject_login_styles():
             background: linear-gradient(135deg, {IMPERIUM_LAVENDER} 0%, #FFFFFF 55%, {IMPERIUM_LAVENDER} 100%);
         }}
 
-        /* CRITICAL: Wipe out Streamlit's automatic block borders and internal forms completely */
-        div[data-testid="stForm"], 
-        div[data-testid="stVerticalBlockBorderWrapper"],
-        .stForm {{
+        /*
+         * CRITICAL: Style the form as the white login card.
+         *
+         * NOTE on a previous bug: an earlier version of this rule added
+         * `div[data-testid="stLayoutWrapper"]:has(div[data-testid="stForm"])`
+         * as a "future-proofing" fallback. That was wrong and caused a
+         * serious layout bug: stLayoutWrapper is the generic wrapper
+         * Streamlit puts around MANY containers on this page, not just the
+         * form (e.g. it also wraps the centering columns around the whole
+         * login card). :has() matches every matching ancestor, so the
+         * white-card treatment (max-width, background, shadow, padding)
+         * was being applied redundantly at multiple nested levels at once,
+         * and the innermost duplicate collapsed to min-content width,
+         * producing the vertical one-letter-per-line text seen in
+         * screenshots. Do NOT reintroduce a wrapper-level selector here.
+         * `div[data-testid="stForm"]` alone is confirmed to exist and work
+         * in the installed Streamlit build — that is the only selector
+         * that should carry the card's box styling.
+         */
+        div[data-testid="stForm"] {{
             max-width: 430px !important;
             margin: 0 auto !important;
             background: {IMPERIUM_WHITE} !important;
@@ -66,9 +82,10 @@ def inject_login_styles():
             border: 1px solid rgba(91, 42, 142, 0.08) !important;
         }}
 
-        /* Remove the inner secondary border wrap lines injected by Streamlit core */
-        div[data-testid="stForm"] > div,
-        div[data-testid="stVerticalBlockBorderWrapper"] > div {{
+        /* Remove any secondary border/background Streamlit places on the
+           form's immediate inner wrapper, without touching anything above
+           or below it in the tree. */
+        div[data-testid="stForm"] > div {{
             padding: 0 !important;
             background: transparent !important;
             border: none !important;
@@ -88,7 +105,9 @@ def inject_login_styles():
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 0 auto 20px auto;
+            margin: 0 auto -32px auto;
+            position: relative;
+            z-index: 2;
             box-shadow: 0 8px 24px rgba(91, 42, 142, 0.25);
         }}
 
@@ -118,6 +137,7 @@ def inject_login_styles():
         }}
 
         /* Input field refinements */
+        div[data-testid="stForm"] input,
         .stTextInput > div > div > input {{
             border-radius: 10px !important;
             border: 1.5px solid #E5DEF0 !important;
@@ -125,46 +145,111 @@ def inject_login_styles():
             font-size: 0.95rem !important;
             background: #FAF8FD !important;
             color: {IMPERIUM_TEXT_DARK} !important;
+            box-shadow: none !important;
         }}
-        
+
+        div[data-testid="stForm"] input:focus,
         .stTextInput > div > div > input:focus {{
             border-color: {IMPERIUM_PURPLE} !important;
             box-shadow: 0 0 0 3px rgba(91, 42, 142, 0.12) !important;
         }}
 
         .stTextInput label p {{
-            font-weight: 600 !important;
-            color: #4A3E56 !important;
-            font-size: 0.9rem !important;
-            margin-bottom: 2px !important;
+            font-weight: 700 !important;
+            color: #1F1530 !important;
+            font-size: 0.92rem !important;
+            margin-bottom: 4px !important;
         }}
 
         /* Premium submit action button updates */
-        div.stButton > button {{
+        div[data-testid="stFormSubmitButton"] {
+            width: 100% !important;
+        }
+
+        div[data-testid="stForm"] button[data-testid="stFormSubmitButton"],
+        div[data-testid="stForm"] div[data-testid="stFormSubmitButton"] > button,
+        div[data-testid="stFormSubmitButton"] > button {
             width: 100% !important;
             border-radius: 999px !important;
             background: linear-gradient(135deg, {IMPERIUM_PURPLE} 0%, {IMPERIUM_PURPLE_DARK} 100%) !important;
             color: white !important;
             border: none !important;
-            padding: 12px 0 !important;
+            padding: 12px 24px !important;
             font-weight: 700 !important;
             font-size: 0.95rem !important;
             letter-spacing: 0.01em !important;
             transition: all 0.15s ease !important;
             box-shadow: 0 6px 18px rgba(91, 42, 142, 0.28) !important;
             margin-top: 16px !important;
-        }}
-        
-        div.stButton > button:hover {{
+        }
+
+        div[data-testid="stForm"] button[data-testid="stFormSubmitButton"]:hover,
+        div[data-testid="stFormSubmitButton"] > button:hover {
             transform: translateY(-1px) !important;
             box-shadow: 0 8px 22px rgba(91, 42, 142, 0.38) !important;
             background: linear-gradient(135deg, {IMPERIUM_PURPLE_LIGHT} 0%, {IMPERIUM_PURPLE} 100%) !important;
             color: white !important;
-        }}
-        
-        div.stButton > button:active {{
+        }
+
+        div[data-testid="stForm"] button[data-testid="stFormSubmitButton"]:active,
+        div[data-testid="stFormSubmitButton"] > button:active {
             transform: translateY(0px) !important;
-        }}
+        }
+
+        /*
+         * Quick login role pill buttons below the form card.
+         * Scoped to st.container(key="role_pill_row") which renders as class .st-key-role_pill_row.
+         */
+        .st-key-role_pill_row div[data-testid="column"] div.stButton > button {
+            background-color: #EDE4F8 !important;
+            color: #3D1B63 !important;
+            border-radius: 999px !important;
+            border: none !important;
+            font-size: 0.75rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.03em !important;
+            text-transform: uppercase !important;
+            padding: 6px 16px !important;
+            box-shadow: none !important;
+            margin-top: 0 !important;
+            height: auto !important;
+            min-height: unset !important;
+            cursor: pointer !important;
+            width: 100% !important;
+            transition: all 0.15s ease !important;
+        }
+
+        .st-key-role_pill_row div[data-testid="column"] div.stButton > button:hover {
+            background-color: #E2D4F5 !important;
+            color: #3D1B63 !important;
+            transform: translateY(-1px) !important;
+        }
+
+        /* Style for second quick login button (Hiring Manager) using sibling selectors */
+        .st-key-role_pill_row div[data-testid="column"] ~ div[data-testid="column"] div.stButton > button {
+            background-color: #E8F0FE !important;
+            color: #1A4FB8 !important;
+            border-radius: 999px !important;
+            border: none !important;
+            font-size: 0.75rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.03em !important;
+            text-transform: uppercase !important;
+            padding: 6px 16px !important;
+            box-shadow: none !important;
+            margin-top: 0 !important;
+            height: auto !important;
+            min-height: unset !important;
+            cursor: pointer !important;
+            width: 100% !important;
+            transition: all 0.15s ease !important;
+        }
+
+        .st-key-role_pill_row div[data-testid="column"] ~ div[data-testid="column"] div.stButton > button:hover {
+            background-color: #D2E3FC !important;
+            color: #1A4FB8 !important;
+            transform: translateY(-1px) !important;
+        }
 
         .role-pill {{
             display: inline-block;
@@ -242,26 +327,37 @@ def render_login_screen():
     """Renders the centered Imperium-branded login card. Sets session state on success."""
     inject_login_styles()
 
-    st.markdown('<div class="login-header-zone">', unsafe_allow_html=True)
-    st.markdown('<div class="login-logo-mark">', unsafe_allow_html=True)
-    st.markdown(
-        """<svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-        <path d="M12 2L2 7l10 5 10-5-10-5z" fill="white" opacity="0.95"/>
-        <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" stroke-width="1.6" fill="none" opacity="0.85"/>
-        </svg>""",
-        unsafe_allow_html=True
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">AI Interview Evaluation</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-subtitle">Sign in to continue to your dashboard</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
     # Standard layout grid mapping
     _, col_center, _ = st.columns([1.1, 1.8, 1.1])
 
     with col_center:
+        # Logo mark rendered OUTSIDE the form, overlapping its top edge via a
+        # negative margin (see .login-logo-mark), so it stays correctly
+        # positioned regardless of how the form's internal padding/border
+        # styling resolves on a given Streamlit version.
+        st.markdown(
+            """
+            <div class="login-logo-mark">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" fill="white" opacity="0.95"/>
+                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" stroke-width="1.6" fill="none" opacity="0.85"/>
+                </svg>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
         with st.form("login_form", clear_on_submit=False):
-            email = st.text_input("Email Address", placeholder="name@imperiumdynamics.com")
+            st.markdown(
+                """
+                <div style="text-align: center;">
+                    <div class="login-title">AI Interview Evaluation</div>
+                    <div class="login-subtitle">Sign in to continue to your dashboard</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            email = st.text_input("Email", placeholder="name@imperiumdynamics.com")
             password = st.text_input("Password", type="password", placeholder="••••••••")
             submitted = st.form_submit_button("Sign In")
 
@@ -281,6 +377,38 @@ def render_login_screen():
             unsafe_allow_html=True
         )
 
+        # Center quick login buttons below the footer.
+        #
+        # NOTE on a previous bug: this used to open the wrapper with
+        # `st.markdown('<div class="role-pill-row">', unsafe_allow_html=True)`
+        # and close it with a second st.markdown('</div>') call after the
+        # columns. That does NOT work in Streamlit — each st.markdown(...)
+        # call renders as its own self-contained, self-closing element in
+        # the DOM; it is not a context manager, so the browser immediately
+        # auto-closes that empty <div> and the st.columns(2) block below
+        # renders as an unrelated sibling, never actually inside
+        # .role-pill-row. The CSS scoped to that class was therefore dead
+        # code. st.container() is the correct tool here: it is a real
+        # Python context manager that genuinely nests everything rendered
+        # inside it under one DOM node, so the CSS class actually wraps the
+        # two role buttons and can't collide with any other st.columns()
+        # block on the page (e.g. the [1.1, 1.8, 1.1] centering columns).
+        role_pill_container = st.container(key="role_pill_row")
+        with role_pill_container:
+            col_hr, col_hm = st.columns(2)
+            with col_hr:
+                if st.button("HR ROLE", key="hr_role_btn", use_container_width=True):
+                    user = authenticate("saba.hr@imperiumdynamics.com", "password123")
+                    if user:
+                        st.session_state.auth_user = user
+                        st.rerun()
+            with col_hm:
+                if st.button("HIRING MANAGER ROLE", key="hm_role_btn", use_container_width=True):
+                    user = authenticate("berkha.hm@imperiumdynamics.com", "password123")
+                    if user:
+                        st.session_state.auth_user = user
+                        st.rerun()
+
 
 def require_login() -> dict:
     """
@@ -290,6 +418,12 @@ def require_login() -> dict:
     """
     if "users_table_ready" not in st.session_state:
         init_users_table()
+        # Seed users if empty
+        from services.auth import create_user, get_user
+        if not get_user("saba.hr@imperiumdynamics.com"):
+            create_user("saba.hr@imperiumdynamics.com", "password123", "hr", "Saba")
+        if not get_user("berkha.hm@imperiumdynamics.com"):
+            create_user("berkha.hm@imperiumdynamics.com", "password123", "hiring_manager", "Berkha")
         st.session_state.users_table_ready = True
 
     if "auth_user" not in st.session_state or st.session_state.auth_user is None:
