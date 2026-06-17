@@ -6,6 +6,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.schemas import DecisionPatchPayload
 from models.candidate import CandidateBundle
@@ -39,6 +40,13 @@ app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
     description="Backend microservice serving multi-agent evaluation DAG pipelines via LangGraph."
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 interview_graph = create_interview_graph()
