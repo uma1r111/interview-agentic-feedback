@@ -29,6 +29,7 @@ from services.database import (
 )
 from services.pdf_extractor import PDFExtractorService
 from services.file_extractor import FileExtractorService
+from services.auth import init_users_table
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("API_Server")
@@ -55,6 +56,7 @@ PROGRESS_STORE: Dict[str, Dict[str, Any]] = {}
 @app.on_event("startup")
 def on_startup():
     init_database()
+    init_users_table()
 
 
 # ==============================================================================
@@ -548,7 +550,11 @@ def get_audit_trail(candidate_id: str) -> List[Dict[str, Any]]:
 @app.patch("/candidates/{candidate_id}/decision", status_code=status.HTTP_200_OK)
 def patch_decision(candidate_id: str, payload: DecisionPatchPayload) -> Dict[str, str]:
     """Updates a candidate's hiring decision. Only the decision column is updated."""
-    updated = update_hiring_decision(candidate_id, payload.decision)
+    updated = update_hiring_decision(
+        candidate_id,
+        payload.decision,
+        changed_by=payload.changed_by
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

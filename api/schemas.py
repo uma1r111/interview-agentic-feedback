@@ -16,3 +16,7 @@ class IntakeRequestPayload(BaseModel):
 class DecisionPatchPayload(BaseModel):
     """Strict data payload covering human-override hiring actions."""
     decision: Decision
+    changed_by: str = Field(
+        default="hiring_manager",
+        description="Display name or email of the user committing this decision."
+    )
