@@ -119,7 +119,11 @@ def submit_decision(candidate_id: str, decision: str):
             st.success(f"✅ Status updated! Candidate locked to: '{decision}'")
             return True
         else:
-            st.error(f"❌ Failed to submit decision: {r.json().get('detail')}")
+            try:
+                detail = r.json().get('detail', 'Unknown error')
+            except ValueError:
+                detail = f"Server error {r.status_code}"
+            st.error(f"❌ Failed to submit decision: {detail}")
     except Exception as e:
         st.error(f"💥 Error: {str(e)}")
     return False
@@ -208,13 +212,25 @@ with tab_reports:
                     st.metric(label="Applied Target Track", value=report["role_applied"])
                 with col3:
                     st.metric(label="Automated MCQ Score", value=f"{report['mcq_score']} / 5.0")
+                    if report.get('mcq_insight'):
+                        with st.expander("📝 MCQ Insight", expanded=True):
+                            st.info(report['mcq_insight'])
 
                 st.markdown("### 📊 Automated Test Code Submissions Insights")
-                code_col1, code_col2 = st.columns(2)
-                with code_col1:
-                    st.metric(label="Programming Q1 Score", value=f"{report['programming_q1_score']} / 5")
-                with code_col2:
-                    st.metric(label="Programming Q2 Score", value=f"{report['programming_q2_score']} / 5")
+                
+                # Handle new programming_passed schema and fallback to legacy q1/q2
+                if "programming_passed" in report and report["programming_passed"] is not None:
+                    prog_status = "✅ PASS" if report["programming_passed"] else "❌ FAIL"
+                    st.metric(label="Programming Logic & Approach", value=prog_status)
+                    if report.get("programming_insight"):
+                        with st.expander("💻 Programming Insight", expanded=True):
+                            st.info(report["programming_insight"])
+                else:
+                    code_col1, code_col2 = st.columns(2)
+                    with code_col1:
+                        st.metric(label="Programming Q1 Score", value=f"{report.get('programming_q1_score', 'N/A')} / 5")
+                    with code_col2:
+                        st.metric(label="Programming Q2 Score", value=f"{report.get('programming_q2_score', 'N/A')} / 5")
 
                 st.markdown("---")
 
@@ -379,8 +395,9 @@ with tab_reports:
             with col_right:
                 st.markdown("### 🛠️ Quick Diagnostics:")
                 try:
-                    health = requests.get(f"{API_BASE_URL}/health", timeout=2).json()
-                    st.success(f"🟢 FastAPI connected. Status: `{health.get('status')}`")
+                    r_health = requests.get(f"{API_BASE_URL}/health", timeout=2)
+                    health = r_health.json() if r_health.status_code == 200 else {}
+                    st.success(f"🟢 FastAPI connected. Status: `{health.get('status', 'ok')}`")
                 except Exception:
                     st.error("🔴 FastAPI not reachable. Run `uvicorn api.main:app --reload` first.")
 
@@ -435,8 +452,17 @@ with tab_intake:
                 timeout=30
             )
             if r.status_code == 200:
-                return True, r.json().get("message", "Saved."), r.json()
-            return False, r.json().get("detail", "Upload failed."), None
+                try:
+                    body = r.json()
+                except ValueError:
+                    body = {}
+                return True, body.get("message", "Saved."), body
+            try:
+                err_body = r.json()
+                err_msg = err_body.get("detail", "Upload failed.")
+            except ValueError:
+                err_msg = f"Server error {r.status_code}"
+            return False, err_msg, None
         except requests.exceptions.ConnectionError:
             return False, "🔌 Cannot reach FastAPI.", None
 
@@ -495,7 +521,11 @@ with tab_intake:
                             st.session_state.intake_dupe_records = []
                             st.rerun()
                         else:
-                            st.error(f"❌ {resp.json().get('detail', 'Error')}")
+                            try:
+                                _d = resp.json().get('detail', 'Error')
+                            except ValueError:
+                                _d = f"Server error {resp.status_code}"
+                            st.error(f"❌ {_d}")
                     except requests.exceptions.ConnectionError:
                         st.error("🔌 Cannot reach FastAPI.")
             with col_no:
@@ -532,11 +562,17 @@ with tab_intake:
                             params={"name": name_clean},
                             timeout=3
                         )
-                        if check_r.status_code == 200 and check_r.json().get("has_duplicates"):
+                        check_body = {}
+                        if check_r.status_code == 200:
+                            try:
+                                check_body = check_r.json()
+                            except ValueError:
+                                pass
+                        if check_body.get("has_duplicates"):
                             st.session_state.intake_confirm_dupe = True
                             st.session_state.intake_dupe_name = name_clean
                             st.session_state.intake_dupe_role = s1_role
-                            st.session_state.intake_dupe_records = check_r.json()["existing_records"]
+                            st.session_state.intake_dupe_records = check_body.get("existing_records", [])
                             st.rerun()
                         else:
                             # No duplicate — create immediately
@@ -546,13 +582,20 @@ with tab_intake:
                                 timeout=5
                             )
                             if resp.status_code == 201:
-                                data = resp.json()
-                                st.session_state.intake_candidate_id = data["candidate_id"]
+                                try:
+                                    data = resp.json()
+                                except ValueError:
+                                    data = {}
+                                st.session_state.intake_candidate_id = data.get("candidate_id")
                                 st.session_state.intake_candidate_name = name_clean
                                 st.session_state.intake_step2_done = False
                                 st.rerun()
                             else:
-                                st.error(f"❌ {resp.json().get('detail', 'Unknown error')}")
+                                try:
+                                    _d = resp.json().get('detail', 'Unknown error')
+                                except ValueError:
+                                    _d = f"Server error {resp.status_code}"
+                                st.error(f"❌ {_d}")
                     except requests.exceptions.ConnectionError:
                         st.error("🔌 Cannot reach FastAPI.")
 
@@ -574,7 +617,8 @@ with tab_intake:
 
             # Fetch live intake record to show current completeness
             try:
-                live_rec = requests.get(f"{API_BASE_URL}/intake/{cid}", timeout=3).json()
+                _rec_r = requests.get(f"{API_BASE_URL}/intake/{cid}", timeout=3)
+                live_rec = _rec_r.json() if _rec_r.status_code == 200 else {}
             except Exception:
                 live_rec = {}
 
@@ -608,95 +652,78 @@ with tab_intake:
                 ("programming", "💻 Programming Answers",         ["pdf","txt","docx"], "prog_file_1",   "One document containing both Q1 & Q2 answers"),
             ]
 
+            done_docs = []
+            pending_docs = []
+
             for doc_key, label, types, field_name, hint in DOC_META:
-                done        = doc_status.get(doc_key, False)
-                replace_key = f"replace_mode_{doc_key}_{cid}"
-                in_replace  = st.session_state.get(replace_key, False)
+                done = doc_status.get(doc_key, False)
+                in_replace = st.session_state.get(f"replace_mode_{doc_key}_{cid}", False)
+                if done and not in_replace:
+                    done_docs.append((doc_key, label, types, field_name, hint))
+                else:
+                    pending_docs.append((doc_key, label, types, field_name, hint, in_replace))
 
-                icon   = "✅" if done else "⬜"
-                border = "#065f46" if (done and not in_replace) else ("#7c3aed" if in_replace else "#3a3a5c")
-
+            # Render locked docs first
+            for doc_key, label, types, field_name, hint in done_docs:
                 st.markdown(
-                    f"<div style='border:1px solid {border};border-radius:8px;padding:10px 14px;margin-bottom:8px'>",
+                    f"<div style='border:1px solid #065f46;border-radius:8px;padding:10px 14px;margin-bottom:8px'>",
                     unsafe_allow_html=True
                 )
                 col_lbl, col_up = st.columns([2, 3])
                 with col_lbl:
-                    st.markdown(f"**{icon} {label}**")
+                    st.markdown(f"**✅ {label}**")
                     st.caption(hint)
-                    if done and not in_replace:
-                        st.markdown(
-                            "<span style='color:#6ee7b7;font-size:0.75rem'>✔ Saved — locked</span>",
-                            unsafe_allow_html=True
-                        )
-                    elif in_replace:
-                        st.markdown(
-                            "<span style='color:#c4b5fd;font-size:0.75rem'>🔄 Replace mode active</span>",
-                            unsafe_allow_html=True
-                        )
-
+                    st.markdown("<span style='color:#6ee7b7;font-size:0.75rem'>✔ Saved — locked</span>", unsafe_allow_html=True)
                 with col_up:
-                    if done and not in_replace:
-                        # ── LOCKED: show Replace button only ─────────────────
-                        if st.button(
-                            f"🔄 Replace {label}",
-                            key=f"replace_btn_{doc_key}_{cid}",
-                            use_container_width=True
-                        ):
-                            st.session_state[replace_key] = True
-                            st.rerun()
+                    if st.button(f"🔄 Replace {label}", key=f"replace_btn_{doc_key}_{cid}", use_container_width=True):
+                        st.session_state[f"replace_mode_{doc_key}_{cid}"] = True
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-                    elif done and in_replace:
-                        # ── REPLACE MODE: uploader + Save & Cancel ────────────
-                        st.caption("⚠️ New file will overwrite the existing one on disk and in the database.")
-                        uploaded = st.file_uploader(
-                            f"Choose replacement for {label}",
-                            type=types,
-                            key=f"uploader_{doc_key}_{cid}",
-                            label_visibility="collapsed"
+            # Render pending docs in a single form
+            if pending_docs:
+                with st.form(f"upload_form_{cid}"):
+                    st.markdown("#### ⏳ Pending Uploads")
+                    uploaders = {}
+                    for doc_key, label, types, field_name, hint, in_replace in pending_docs:
+                        st.markdown(f"**{'🔄' if in_replace else '⬜'} {label}**")
+                        st.caption(hint)
+                        if in_replace:
+                            st.caption("⚠️ New file will overwrite the existing one on disk and in the database.")
+                        
+                        uploaders[field_name] = st.file_uploader(
+                            f"Choose file", type=types, key=f"up_{doc_key}_{cid}", label_visibility="collapsed"
                         )
-                        save_col, cancel_col = st.columns(2)
-                        with save_col:
-                            if uploaded:
-                                if st.button("💾 Save & Replace", key=f"save_{doc_key}_{cid}", use_container_width=True):
-                                    with st.spinner(f"Replacing {label}..."):
-                                        ok, msg, result = _upload_partial(cid, {field_name: uploaded})
-                                    if ok:
-                                        st.success(
-                                            f"✅ {label} replaced!"
-                                            + (f" New MCQ Score: **{result.get('mcq_score')}/5.0**"
-                                               if doc_key == "mcq" and result.get("mcq_score") else "")
-                                        )
-                                        st.session_state[replace_key] = False
-                                        st.rerun()
-                                    else:
-                                        st.error(f"❌ {msg}")
-                        with cancel_col:
-                            if st.button("❌ Cancel", key=f"cancel_{doc_key}_{cid}", use_container_width=True):
-                                st.session_state[replace_key] = False
+                        st.markdown("<div style='height: 10px'></div>", unsafe_allow_html=True)
+
+                    col_save, col_cancel = st.columns(2)
+                    with col_save:
+                        submitted = st.form_submit_button("💾 Save Selected Documents", use_container_width=True, type="primary")
+                    with col_cancel:
+                        has_replace = any(in_rep for _, _, _, _, _, in_rep in pending_docs)
+                        if has_replace:
+                            if st.form_submit_button("❌ Cancel Replacements", use_container_width=True):
+                                for doc_key, _, _, _, _, in_replace in pending_docs:
+                                    if in_replace:
+                                        st.session_state[f"replace_mode_{doc_key}_{cid}"] = False
                                 st.rerun()
 
-                    else:
-                        # ── EMPTY: first-time upload ──────────────────────────
-                        uploaded = st.file_uploader(
-                            f"Upload {label}",
-                            type=types,
-                            key=f"uploader_{doc_key}_{cid}",
-                            label_visibility="collapsed"
-                        )
-                        if uploaded:
-                            if st.button(f"💾 Save {label}", key=f"save_{doc_key}_{cid}", use_container_width=True):
-                                with st.spinner(f"Saving {label}..."):
-                                    ok, msg, result = _upload_partial(cid, {field_name: uploaded})
-                                if ok:
-                                    st.success(
-                                        f"✅ {label} saved!"
-                                        + (f" MCQ Score extracted: **{result.get('mcq_score')}/5.0**"
-                                           if doc_key == "mcq" and result.get("mcq_score") else "")
-                                    )
-                                    st.rerun()
-                                else:
-                                    st.error(f"❌ {msg}")
+                    if submitted:
+                        files_to_upload = {f_name: up for f_name, up in uploaders.items() if up is not None}
+                        if not files_to_upload:
+                            st.error("No files selected to upload.")
+                        else:
+                            with st.spinner("Uploading documents..."):
+                                ok, msg, result = _upload_partial(cid, files_to_upload)
+                            if ok:
+                                st.success("✅ Documents saved successfully!")
+                                # clear replace modes for the files that were just uploaded
+                                for doc_key, _, _, field_name, _, in_replace in pending_docs:
+                                    if in_replace and uploaders.get(field_name) is not None:
+                                        st.session_state[f"replace_mode_{doc_key}_{cid}"] = False
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {msg}")
 
 
 
@@ -724,23 +751,43 @@ with tab_intake:
             )
             if st.button("🚀 Run Full Evaluation Now", key="run_eval_btn",
                          use_container_width=True, type="primary"):
-                with st.spinner(f"Evaluating {cname}... (1–2 minutes)"):
-                    try:
-                        resp = requests.post(f"{API_BASE_URL}/intake/{cid}/evaluate", timeout=300)
-                        if resp.status_code == 200:
-                            st.success(
-                                f"✅ Evaluation complete! Switch to **📊 Candidate Reports** "
-                                f"and load ID `{cid}` to view the report."
-                            )
-                            st.session_state.intake_candidate_id = None
-                            st.session_state.intake_candidate_name = ""
-                            st.session_state.intake_step2_done = False
-                        else:
-                            st.error(f"❌ {resp.json().get('detail', 'Evaluation failed.')}")
-                    except requests.exceptions.ReadTimeout:
-                        st.warning("⏱️ Request timed out — pipeline may still be running. Check Reports tab.")
-                    except requests.exceptions.ConnectionError:
-                        st.error("🔌 Cannot reach FastAPI.")
+                try:
+                    resp = requests.post(f"{API_BASE_URL}/intake/{cid}/evaluate", timeout=30)
+                    if resp.status_code == 200:
+                        import time
+                        with st.status("Evaluating candidate in background...", expanded=True) as status_ui:
+                            seen_events = set()
+                            while True:
+                                prog_resp = requests.get(f"{API_BASE_URL}/intake/{cid}/progress", timeout=5).json()
+                                status_state = prog_resp.get("status")
+                                events = prog_resp.get("events", [])
+                                
+                                for ev in events:
+                                    if ev not in seen_events:
+                                        friendly_name = ev.replace("_", " ").title()
+                                        st.write(f"✅ Completed node: **{friendly_name}**")
+                                        seen_events.add(ev)
+                                        
+                                if status_state == "completed":
+                                    status_ui.update(label="Evaluation Complete!", state="complete", expanded=False)
+                                    st.session_state.intake_candidate_id = None
+                                    st.session_state.intake_candidate_name = ""
+                                    st.session_state.intake_step2_done = False
+                                    st.rerun()  # forces full page refresh so Reports tab picks up the new candidate
+                                elif status_state == "failed":
+                                    status_ui.update(label="Evaluation Failed!", state="error", expanded=True)
+                                    st.error(f"❌ {prog_resp.get('error')}")
+                                    break
+                                    
+                                time.sleep(1.5)
+                    else:
+                        try:
+                            err_detail = resp.json().get('detail', 'Evaluation failed.')
+                        except ValueError:
+                            err_detail = f"Server returned {resp.status_code}: {resp.text}"
+                        st.error(f"❌ {err_detail}")
+                except requests.exceptions.ConnectionError:
+                    st.error("🔌 Cannot reach FastAPI.")
 
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -772,7 +819,8 @@ with tab_intake:
         else:
             awaiting  = [r for r in intake_list if r["status"] == "awaiting_files"]
             ready     = [r for r in intake_list if r["status"] == "ready"]
-            evaluated = [r for r in intake_list if r["status"] == "evaluated"]
+            awaiting  = [r for r in intake_list if r["status"] == "awaiting_files"]
+            ready     = [r for r in intake_list if r["status"] == "ready"]
 
             # ── Ready ────────────────────────────────────────────────────────
             if ready:
@@ -788,21 +836,38 @@ with tab_intake:
                         st.caption(f"`{row['candidate_id']}`")
                     with col_b:
                         if st.button("🚀", key=f"q_eval_{row['candidate_id']}", help="Run Evaluation"):
-                            with st.spinner(f"Evaluating {row['candidate_name']}..."):
-                                try:
-                                    r = requests.post(
-                                        f"{API_BASE_URL}/intake/{row['candidate_id']}/evaluate",
-                                        timeout=300
-                                    )
-                                    if r.status_code == 200:
-                                        st.success("Done! Check Candidate Reports.")
-                                        st.rerun()
-                                    else:
-                                        st.error(r.json().get("detail", "Error"))
-                                except requests.exceptions.ReadTimeout:
-                                    st.warning("Timeout — check Reports tab in a moment.")
-                                except requests.exceptions.ConnectionError:
-                                    st.error("FastAPI not reachable.")
+                            try:
+                                r = requests.post(
+                                    f"{API_BASE_URL}/intake/{row['candidate_id']}/evaluate",
+                                    timeout=30
+                                )
+                                if r.status_code == 200:
+                                    import time
+                                    with st.status(f"Evaluating {row['candidate_name']}...", expanded=True) as status_ui:
+                                        seen_ev = set()
+                                        while True:
+                                            pg = requests.get(f"{API_BASE_URL}/intake/{row['candidate_id']}/progress", timeout=5).json()
+                                            for ev in pg.get("events", []):
+                                                if ev not in seen_ev:
+                                                    st.write(f"✅ {ev.replace('_', ' ').title()}")
+                                                    seen_ev.add(ev)
+                                            if pg.get("status") == "completed":
+                                                status_ui.update(label="Done!", state="complete", expanded=False)
+                                                st.rerun()
+                                                break
+                                            elif pg.get("status") == "failed":
+                                                status_ui.update(label="Failed!", state="error")
+                                                st.error(f"❌ {pg.get('error')}")
+                                                break
+                                            time.sleep(1.5)
+                                else:
+                                    try:
+                                        detail = r.json().get("detail", "Evaluation failed.")
+                                    except ValueError:
+                                        detail = f"Server error {r.status_code}: {r.text[:200]}"
+                                    st.error(f"❌ {detail}")
+                            except requests.exceptions.ConnectionError:
+                                st.error("🔌 FastAPI not reachable.")
                     st.markdown("---")
 
             # ── Awaiting ─────────────────────────────────────────────────────
@@ -844,7 +909,11 @@ with tab_intake:
                                         timeout=5
                                     )
                                     if r.status_code == 200:
-                                        st.success(f"✅ {r.json().get('message', 'Deleted.')}")
+                                        try:
+                                            _msg = r.json().get('message', 'Deleted.')
+                                        except ValueError:
+                                            _msg = 'Deleted.'
+                                        st.success(f"✅ {_msg}")
                                         st.session_state.confirm_delete_id = None
                                         # If this was the active wizard candidate, reset wizard
                                         if st.session_state.intake_candidate_id == cid_row:
@@ -853,7 +922,11 @@ with tab_intake:
                                             st.session_state.intake_step2_done = False
                                         st.rerun()
                                     else:
-                                        st.error(f"❌ {r.json().get('detail', 'Delete failed.')}")
+                                        try:
+                                            _err = r.json().get('detail', 'Delete failed.')
+                                        except ValueError:
+                                            _err = f"Server error {r.status_code}"
+                                        st.error(f"❌ {_err}")
                                         st.session_state.confirm_delete_id = None
                                 except requests.exceptions.ConnectionError:
                                     st.error("🔌 Cannot reach FastAPI.")
@@ -890,17 +963,4 @@ with tab_intake:
 
                     st.markdown("---")
 
-            # ── Evaluated ────────────────────────────────────────────────────
-            if evaluated:
-                st.markdown(f"**🟢 Evaluated ({len(evaluated)})**")
-                for row in evaluated:
-                    st.markdown(
-                        f"**{row['candidate_name']}**  \n"
-                        f"<span class='status-badge-evaluated'>EVALUATED</span> &nbsp; {row['role_type']}",
-                        unsafe_allow_html=True
-                    )
-                    st.caption(
-                        f"`{row['candidate_id']}` · "
-                        f"Evaluated: {(row.get('evaluated_at') or '')[:10]}"
-                    )
-                    st.markdown("---")
+

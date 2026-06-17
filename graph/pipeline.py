@@ -4,6 +4,8 @@ from langgraph.graph import StateGraph, START, END
 
 from models.candidate import InterviewState
 from agents.ingestion_agent import IngestionAgent
+from agents.mcq_checker_agent import MCQCheckerAgent
+from agents.programming_checker_agent import ProgrammingCheckerAgent
 from agents.communication_agent import CommunicationAgent
 from agents.technical_depth_agent import TechnicalDepthAgent
 from agents.problem_solving_agent import ProblemSolvingAgent
@@ -61,6 +63,43 @@ def ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "mcq_responses":       None,   # P1-05: drop raw MCQ selections after ingestion consumes them
         "error": None
     }
+
+def mcq_checker_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Grades the candidate's MCQ test from the saved file and writes back the real score."""
+    logger.info("--- START NODE: MCQ CHECKER AGENT ---")
+
+    mcq_path = state.get("mcq_path")
+    if not mcq_path:
+        logger.warning("mcq_checker_node: mcq_path is missing — keeping placeholder score 0.0")
+        return {"mcq_score": 0.0, "mcq_insight": "MCQ file was not provided."}
+
+    try:
+        agent = MCQCheckerAgent()
+        mcq_score, insight, _ = agent.evaluate(mcq_path)
+        logger.info(f"MCQ evaluation complete: score={mcq_score}/5")
+        return {"mcq_score": mcq_score, "mcq_insight": insight}
+    except Exception as e:
+        logger.error(f"MCQ checker failed: {e}")
+        return {"mcq_score": 0.0, "mcq_insight": f"MCQ evaluation failed: {str(e)}"}
+
+def programming_checker_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluates the candidate's programming logic from the saved file."""
+    logger.info("--- START NODE: PROGRAMMING CHECKER AGENT ---")
+
+    prog_path = state.get("programming_path")
+    if not prog_path:
+        logger.warning("programming_checker_node: programming_path is missing")
+        return {"programming_passed": False, "programming_insight": "Programming answers file was not provided."}
+
+    try:
+        agent = ProgrammingCheckerAgent()
+        passed, insight, _ = agent.evaluate(prog_path)
+        logger.info(f"Programming evaluation complete: passed={passed}")
+        return {"programming_passed": passed, "programming_insight": insight}
+    except Exception as e:
+        logger.error(f"Programming checker failed: {e}")
+        return {"programming_passed": False, "programming_insight": f"Programming evaluation failed: {str(e)}"}
+
 
 def preprocess_transcript_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Cleans raw diarized transcripts into structured Q&A pairs to reduce noise."""
@@ -197,7 +236,6 @@ def feedback_compiler_node(state: Dict[str, Any]) -> Dict[str, Any]:
         candidate_name=state.get("candidate_name", ""),
         role_type=state.get("role_type"),
         mcq_score=state.get("mcq_score", 0.0),
-        programming_answers=state.get("programming_answers", ["", ""]),
         communication=state.get("communication_score"),
         technical=state.get("technical_score"),
         problem_solving=state.get("problem_solving_score"),
@@ -211,6 +249,19 @@ def feedback_compiler_node(state: Dict[str, Any]) -> Dict[str, Any]:
     if cv_match and report:
         report.cv_experience_match = cv_match
         logger.info("CV experience match attached to FeedbackReport.")
+        
+    mcq_insight = state.get("mcq_insight")
+    if mcq_insight and report:
+        report.mcq_insight = mcq_insight
+        logger.info("MCQ insight attached to FeedbackReport.")
+
+    prog_passed = state.get("programming_passed")
+    if prog_passed is not None and report:
+        report.programming_passed = prog_passed
+    prog_insight = state.get("programming_insight")
+    if prog_insight and report:
+        report.programming_insight = prog_insight
+        logger.info("Programming insight attached to FeedbackReport.")
 
     return {"feedback_report": report}
 
@@ -247,6 +298,8 @@ def create_interview_graph():
 
     # Register all nodes
     builder.add_node("ingest",                   ingestion_node)
+    builder.add_node("check_mcq",                mcq_checker_node)
+    builder.add_node("check_programming",        programming_checker_node)
     builder.add_node("preprocess_transcripts",   preprocess_transcript_node)
     builder.add_node("screen_transcript_bias",      transcript_bias_screen_node)
     builder.add_node("evaluate_communication",   communication_node)
@@ -260,15 +313,19 @@ def create_interview_graph():
     # Entry point
     builder.add_edge(START, "ingest")
 
-    # Conditional edge: abort on ingestion error, otherwise go to preprocessor
+    # Conditional edge: abort on ingestion error, otherwise run MCQ checker first
     builder.add_conditional_edges(
         "ingest",
         route_after_ingestion,
         {
             "abort_pipeline": END,
-            "continue":       "preprocess_transcripts"
+            "continue":       "check_mcq"
         }
     )
+
+    # MCQ checker always continues to check_programming
+    builder.add_edge("check_mcq", "check_programming")
+    builder.add_edge("check_programming", "preprocess_transcripts")
 
     builder.add_edge("preprocess_transcripts", "screen_transcript_bias")
 

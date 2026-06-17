@@ -5,7 +5,7 @@ import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, status
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
 
 from api.schemas import DecisionPatchPayload
 from models.candidate import CandidateBundle
@@ -49,6 +49,8 @@ file_extractor = FileExtractorService()
 # ==============================================================================
 # Application Startup
 # ==============================================================================
+
+PROGRESS_STORE: Dict[str, Dict[str, Any]] = {}
 
 @app.on_event("startup")
 def on_startup():
@@ -341,12 +343,10 @@ async def intake_upload_files(
 
 
 @app.post("/intake/{candidate_id}/evaluate", status_code=status.HTTP_200_OK)
-def intake_run_evaluation(candidate_id: str) -> Dict[str, str]:
+def intake_run_evaluation(candidate_id: str, background_tasks: BackgroundTasks) -> Dict[str, str]:
     """
     Step 3: Triggers the full LangGraph multi-agent evaluation pipeline
-    for a candidate whose status is 'ready'. Reads all data from the
-    candidate's fixtures folder and DB record. Saves result to the
-    candidates table and marks intake status as 'evaluated'.
+    for a candidate in the background. Returns immediately.
     """
     intake = get_intake_candidate(candidate_id)
     if not intake:
@@ -440,46 +440,79 @@ def intake_run_evaluation(candidate_id: str) -> Dict[str, str]:
             detail=f"Candidate bundle validation failed: {str(validation_err)}"
         )
 
-    # -- Run the LangGraph pipeline --
-    try:
-        initial_inputs = {
-            "candidate_name":      candidate_bundle.candidate_name,
-            "role_type":           candidate_bundle.role_type,
-            "raw_cv":              candidate_bundle.raw_cv,
-            "mcq_score":           candidate_bundle.mcq_score,
-            "mcq_path":            intake["mcq_path"],            # MCQ Agent reads the raw file
-            "programming_path":    intake["programming_path"],   # Programming Agent reads the raw file
-            "programming_answers": candidate_bundle.programming_answers,
-            "session1_transcript": candidate_bundle.session1_transcript,
-            "session2_transcript": candidate_bundle.session2_transcript,
-            "raw_payload":         candidate_bundle.model_dump(),
-            "mcq_responses":       {},                           # MCQ Agent will populate this
-        }
-        final_output_state = interview_graph.invoke(initial_inputs)
-    except Exception as pipeline_err:
-        logger.error(f"Intake evaluation pipeline error: {str(pipeline_err)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Pipeline execution error: {str(pipeline_err)}"
-        )
+    # -- Assemble initial state for LangGraph --
+    initial_inputs = {
+        "candidate_name":      candidate_bundle.candidate_name,
+        "role_type":           candidate_bundle.role_type,
+        "raw_cv":              candidate_bundle.raw_cv,
+        "mcq_score":           candidate_bundle.mcq_score,
+        "mcq_path":            intake["mcq_path"],
+        "programming_path":    intake["programming_path"],
+        "programming_answers": candidate_bundle.programming_answers,
+        "session1_transcript": candidate_bundle.session1_transcript,
+        "session2_transcript": candidate_bundle.session2_transcript,
+        "raw_payload":         candidate_bundle.model_dump(),
+        "mcq_responses":       {},
+    }
 
-    if final_output_state.get("error"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Pipeline aborted: {final_output_state['error']}"
-        )
+    # -- Dispatch Background Task --
+    background_tasks.add_task(run_evaluation_background, candidate_id, initial_inputs)
 
-    # Use the same candidate_id so the intake and evaluation records are linked
-    final_output_state["candidate_id"] = candidate_id
-    save_candidate(candidate_id, final_output_state)
-    mark_intake_evaluated(candidate_id)
-
-    logger.info(f"Intake evaluation complete for: {candidate_id}")
+    logger.info(f"Intake evaluation background task dispatched for: {candidate_id}")
     return {
         "candidate_id": candidate_id,
-        "status": "evaluated",
-        "message": "Multi-agent evaluation completed. Report is available in the dashboard."
+        "status": "running",
+        "message": "Evaluation started in the background."
     }
+
+def run_evaluation_background(candidate_id: str, initial_inputs: dict):
+    """
+    Executes the interview graph synchronously in a background thread,
+    streaming state updates to the PROGRESS_STORE for UI polling.
+    """
+    logger.info(f"Starting background evaluation for {candidate_id}")
+    PROGRESS_STORE[candidate_id] = {"status": "running", "events": []}
+    
+    try:
+        final_output_state = dict(initial_inputs)
+        
+        # stream_mode="updates" yields {node_name: {state_update}} after each node
+        for update in interview_graph.stream(initial_inputs, stream_mode="updates"):
+            for node_name, state_update in update.items():
+                logger.info(f"Completed node: {node_name}")
+                PROGRESS_STORE[candidate_id]["events"].append(node_name)
+                final_output_state.update(state_update)
+
+        if final_output_state.get("error"):
+            logger.error(f"Pipeline aborted in background: {final_output_state['error']}")
+            PROGRESS_STORE[candidate_id]["status"] = "failed"
+            PROGRESS_STORE[candidate_id]["error"] = final_output_state["error"]
+            return
+
+        # Save to DB
+        final_output_state["candidate_id"] = candidate_id
+        save_candidate(candidate_id, final_output_state)
+        mark_intake_evaluated(candidate_id)
+
+        logger.info(f"Background evaluation successfully completed for {candidate_id}")
+        PROGRESS_STORE[candidate_id]["status"] = "completed"
+        
+    except Exception as pipeline_err:
+        logger.error(f"Background evaluation error: {str(pipeline_err)}")
+        PROGRESS_STORE[candidate_id]["status"] = "failed"
+        PROGRESS_STORE[candidate_id]["error"] = f"Pipeline execution error: {str(pipeline_err)}"
+
+@app.get("/intake/{candidate_id}/progress", status_code=status.HTTP_200_OK)
+def get_evaluation_progress(candidate_id: str) -> Dict[str, Any]:
+    """Returns the live streaming progress of a background evaluation."""
+    if candidate_id not in PROGRESS_STORE:
+        # Check DB in case the server restarted but it was evaluated
+        intake = get_intake_candidate(candidate_id)
+        if intake and intake.get("status") == "evaluated":
+            return {"status": "completed", "events": ["Evaluation already complete"]}
+        return {"status": "not_started", "events": []}
+    
+    return PROGRESS_STORE[candidate_id]
 
 
 @app.get("/candidates", status_code=status.HTTP_200_OK)

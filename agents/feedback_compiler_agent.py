@@ -21,7 +21,6 @@ class FeedbackCompilerAgent(BaseAgent):
         candidate_name: str,
         role_type: RoleType,
         mcq_score: float,
-        programming_answers: List[str],
         communication: EvalScore,
         technical: TechnicalDimensionReport,        # CHANGED from EvalScore
         problem_solving: EvalScore,
@@ -83,16 +82,13 @@ class FeedbackCompilerAgent(BaseAgent):
             "2. Technical Depth Mapping: The technical_depth field must be populated as a full TechnicalDimensionReport. "
             "Use the provided overall score, overall justification, and dimension breakdown exactly as given — "
             "do not modify or re-evaluate them. Carry them through verbatim into the report.\n"
-            "3. Coding Question Extrapolations: Infer two standalone integer scores strictly between 1 and 5 specifically "
-            "for 'programming_q1_score' and 'programming_q2_score' based entirely on the Technical Agent's analysis "
-            "and the provided raw code text answers.\n"
-            "4. Strengths & Concerns Syntheses: Generate exactly 2 to 3 distinct, actionable bullet points for strengths "
+            "3. Strengths & Concerns Syntheses: Generate exactly 2 to 3 distinct, actionable bullet points for strengths "
             "and exactly 2 to 3 for concerns. Draw from technical dimension scores, communication quality, "
             "problem solving indicators, and cultural alignment signals.\n"
-            "5. Dynamic Recommendation: Formulate a final holistic 'ai_recommendation' enum value ('Strong Yes', 'Yes', 'Maybe', 'No') "
+            "4. Dynamic Recommendation: Formulate a final holistic 'ai_recommendation' enum value ('Strong Yes', 'Yes', 'Maybe', 'No') "
             "and a single-sentence 'ai_justification'. Factor in all dimensions — a candidate with high overall scores "
             "but weak dimension-level gaps (e.g. low hallucination_handling for an AI role) should be weighted accordingly.\n"
-            "6. Interviewer Bias Flags: If bias flags are present in the input, you MUST include at least one concern "
+            "5. Interviewer Bias Flags: If bias flags are present in the input, you MUST include at least one concern "
             "bullet noting that the evaluation may have been influenced by biased interviewer questions. "
             "Do NOT adjust the candidate's scores based on the flags — only note the evaluation quality risk.\n\n"
             "   - Weighting Signal (CV Fit): If a CV Experience Match block is provided, use it as a secondary, minor weighting signal. "
@@ -106,8 +102,6 @@ class FeedbackCompilerAgent(BaseAgent):
             "- candidate_name: Full name of candidate\n"
             "- role_applied: String representation of the target career track\n"
             "- mcq_score: Float tracking programmatic score out of 5\n"
-            "- programming_q1_score: Integer from 1 to 5\n"
-            "- programming_q2_score: Integer from 1 to 5\n"
             "- communication: Complete EvalScore object\n"
             "- technical_depth: Complete TechnicalDimensionReport object with overall_score, overall_justification, and dimensions list\n"
             "- problem_solving: Complete EvalScore object\n"
@@ -142,10 +136,6 @@ class FeedbackCompilerAgent(BaseAgent):
             f"Candidate: {candidate_name}\n"
             f"Target Role: {role_type.value}\n"
             f"Programmatic MCQ Score: {mcq_score}/5.0\n\n"
-            f"--- START CODE INPUTS ---\n"
-            f"Q1 Code: {programming_answers[0]}\n"
-            f"Q2 Code: {programming_answers[1]}\n"
-            f"--- END CODE INPUTS ---\n\n"
             f"--- START AGENT METRIC FEEDS ---\n"
             f"[Communication Evaluator]: Score={communication.score} | Justification={communication.justification}\n\n"
             f"[Technical Depth Evaluator]:\n{technical_block}\n"
@@ -169,8 +159,6 @@ class FeedbackCompilerAgent(BaseAgent):
                 candidate_name=candidate_name,
                 role_applied=role_type.value,
                 mcq_score=mcq_score,
-                programming_q1_score=1,
-                programming_q2_score=1,
                 communication=communication,
                 technical_depth=technical,
                 problem_solving=problem_solving,

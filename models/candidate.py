@@ -25,9 +25,12 @@ class InterviewState(TypedDict, total=False):
     role_type: RoleType
     raw_cv: str                          # Written by Ingestion Agent; passed to CV Parsing Agent
     mcq_score: float
+    mcq_insight: Optional[str]           # One-paragraph insight written by MCQ Checker Agent
     mcq_path: Optional[str]              # Path to raw MCQ answers file — read by MCQ Checker Agent
     programming_path: Optional[str]      # Path to raw programming answers file — read by Programming Checker Agent
     programming_answers: List[str]
+    programming_passed: Optional[bool]
+    programming_insight: Optional[str]
     session1_transcript: str
     session2_transcript: str
     clean_session1: str

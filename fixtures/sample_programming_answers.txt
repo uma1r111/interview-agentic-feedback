@@ -1,0 +1,226 @@
+================================================================================
+           PROGRAMMING TEST — AI ENGINEER (LEETCODE STYLE)
+================================================================================
+
+Candidate:       Saad Mehmood
+Position:        AI Engineer (Junior)
+Test ID:         PCT-AI-2026-0502
+Date Taken:      June 08, 2026
+Time Allowed:    60 minutes
+Time Taken:      60 minutes (used full time)
+Total Questions: 3
+
+Instructions:    Solve the following problems using pseudo-code or any
+                 programming language of your choice. Focus on correctness,
+                 efficiency, and clarity. Explain your approach before writing
+                 the solution.
+
+================================================================================
+
+QUESTION 1: Merge K Sorted Lists                       [Difficulty: Hard]
+================================================================================
+
+You are given an array of K linked lists, each sorted in ascending order.
+Merge all the linked lists into one sorted linked list and return it.
+
+Example:
+  Input:  lists = [[1, 4, 5], [1, 3, 4], [2, 6]]
+  Output: [1, 1, 2, 3, 4, 4, 5, 6]
+
+Constraints:
+  - k == lists.length
+  - 0 <= k <= 10^4
+  - 0 <= lists[i].length <= 500
+  - -10^4 <= lists[i][j] <= 10^4
+  - Each lists[i] is sorted in ascending order.
+  - The total number of nodes across all lists will not exceed 10^4.
+
+================================================================================
+SAAD'S ANSWER — QUESTION 1:
+================================================================================
+
+APPROACH:
+  I think we can just put all the numbers from all lists into one big
+  list and then sort it. That should give us the right answer.
+
+PSEUDO-CODE:
+
+  FUNCTION mergeKLists(lists):
+      all_numbers = EMPTY LIST
+
+      FOR EACH list IN lists:
+          FOR EACH number IN list:
+              APPEND number TO all_numbers
+
+      SORT all_numbers
+
+      RETURN all_numbers
+
+I think the time complexity is O(n log n) because of the sorting.
+n is the total number of elements.
+
+================================================================================
+
+QUESTION 2: LRU Cache                                  [Difficulty: Medium]
+================================================================================
+
+Design a data structure that follows the constraints of a Least Recently Used
+(LRU) cache.
+
+Implement the LRUCache class:
+  - LRUCache(int capacity) — Initialize the cache with positive size capacity.
+  - int get(int key)       — Return the value of the key if it exists,
+                              otherwise return -1.
+  - void put(int key, int value) — Update the value of the key if it exists.
+                                    Otherwise, add the key-value pair. If the
+                                    number of keys exceeds the capacity, evict
+                                    the least recently used key.
+
+Both get and put must run in O(1) average time complexity.
+
+Example:
+  cache = LRUCache(2)
+  cache.put(1, 1)       // cache: {1=1}
+  cache.put(2, 2)       // cache: {1=1, 2=2}
+  cache.get(1)          // returns 1, cache: {2=2, 1=1}
+  cache.put(3, 3)       // evicts key 2, cache: {1=1, 3=3}
+  cache.get(2)          // returns -1 (not found)
+  cache.put(4, 4)       // evicts key 1, cache: {3=3, 4=4}
+  cache.get(1)          // returns -1 (not found)
+  cache.get(3)          // returns 3
+  cache.get(4)          // returns 4
+
+================================================================================
+SAAD'S ANSWER — QUESTION 2:
+================================================================================
+
+APPROACH:
+  I'll use a dictionary to store the key-value pairs. For tracking which
+  one was used least recently, I'll use a list that keeps track of the
+  order keys were accessed.
+
+PSEUDO-CODE:
+
+  CLASS LRUCache:
+
+      CONSTRUCTOR(capacity):
+          this.capacity = capacity
+          this.data = EMPTY DICTIONARY    // key -> value
+          this.order = EMPTY LIST         // tracks access order
+
+      FUNCTION get(key):
+          IF key IN this.data:
+              // Move to end of order list (most recent)
+              REMOVE key FROM this.order
+              APPEND key TO this.order
+              RETURN this.data[key]
+          ELSE:
+              RETURN -1
+
+      FUNCTION put(key, value):
+          IF key IN this.data:
+              this.data[key] = value
+              REMOVE key FROM this.order
+              APPEND key TO this.order
+          ELSE:
+              IF LENGTH(this.data) >= this.capacity:
+                  // Remove least recently used
+                  oldest_key = this.order[0]
+                  REMOVE this.order[0]
+                  DELETE this.data[oldest_key]
+
+              this.data[key] = value
+              APPEND key TO this.order
+
+I think get is O(1) because dictionary lookup is O(1).
+And put is O(1) too. I think this should work.
+
+================================================================================
+
+QUESTION 3: Word Ladder                                 [Difficulty: Hard]
+================================================================================
+
+A transformation sequence from word beginWord to word endWord using a
+dictionary wordList is a sequence of words:
+  beginWord -> s1 -> s2 -> ... -> sk
+
+such that:
+  - Every adjacent pair of words differs by a single letter.
+  - Every si (1 <= i <= k) is in wordList.
+  - beginWord does not need to be in wordList.
+
+Given beginWord, endWord, and wordList, return the number of words in the
+shortest transformation sequence, or 0 if no such sequence exists.
+
+Example 1:
+  Input:  beginWord = "hit", endWord = "cog",
+          wordList = ["hot", "dot", "dog", "lot", "log", "cog"]
+  Output: 5
+  Explanation: "hit" -> "hot" -> "dot" -> "dog" -> "cog"
+
+Example 2:
+  Input:  beginWord = "hit", endWord = "cog",
+          wordList = ["hot", "dot", "dog", "lot", "log"]
+  Output: 0
+  Explanation: endWord "cog" is not in wordList.
+
+Constraints:
+  - 1 <= beginWord.length <= 10
+  - endWord.length == beginWord.length
+  - 1 <= wordList.length <= 5000
+  - All words have the same length.
+  - All words consist of lowercase English letters.
+  - beginWord != endWord
+
+================================================================================
+SAAD'S ANSWER — QUESTION 3:
+================================================================================
+
+APPROACH:
+  I need to find the shortest path from beginWord to endWord where each
+  step changes one letter. I think I should try all possible paths and
+  find the shortest one.
+
+  I'll use recursion. At each step, try changing each letter to every
+  possible letter (a-z), check if the new word is in the word list, and
+  if so, recurse. Keep track of the shortest path found.
+
+PSEUDO-CODE:
+
+  FUNCTION ladderLength(beginWord, endWord, wordList):
+      IF endWord NOT IN wordList:
+          RETURN 0
+
+      visited = EMPTY SET
+      result = findPath(beginWord, endWord, wordList, visited, 1)
+
+      IF result == INFINITY:
+          RETURN 0
+      RETURN result
+
+  FUNCTION findPath(currentWord, endWord, wordList, visited, depth):
+      IF currentWord == endWord:
+          RETURN depth
+
+      ADD currentWord TO visited
+      shortest = INFINITY
+
+      // Try changing each position
+      FOR i = 0 TO LENGTH(currentWord) - 1:
+          FOR letter = 'a' TO 'z':
+              newWord = currentWord with position i changed to letter
+
+              IF newWord IN wordList AND newWord NOT IN visited:
+                  result = findPath(newWord, endWord, wordList, visited, depth + 1)
+                  shortest = MIN(shortest, result)
+
+      REMOVE currentWord FROM visited    // backtrack
+      RETURN shortest
+
+I'm not sure about the time complexity but I think it explores all
+possible paths so it might be slow for large inputs. Maybe there's a
+faster way using BFS but I'm more comfortable with recursion.
+
+================================================================================
+                           END OF TEST
+================================================================================

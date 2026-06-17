@@ -1,0 +1,80 @@
+Python Multiple Choice Test — AI Engineer Role
+Candidate Name: Test Candidate
+Date: 2026-06-16
+
+Instructions: Choose the best answer for each question. Mark your chosen answer with [X].
+
+------------------------------------------------------------------------------
+
+Q1. What does RAG stand for in the context of LLMs?
+    A) Retrieval Augmented Generation
+    B) Recursive Aggregation Grammar
+    C) Ranked Answer Generation
+    D) Runtime Augmented Graph
+    Answer: A
+
+Q2. Which data structure provides O(1) average-case lookup time?
+    A) Linked List
+    B) Binary Tree
+    C) Hash Map
+    D) Array
+    Answer: C
+
+Q3. In LangGraph, what does a StateGraph node receive and return?
+    A) A prompt string and a response string
+    B) A typed state dict and an updated state dict
+    C) A list of messages and a new message
+    D) A tool call and a tool result
+    Answer: B
+
+Q4. Which of the following is NOT a common chunking strategy in RAG pipelines?
+    A) Fixed-size chunking with overlap
+    B) Sentence-based chunking
+    C) Token-budget chunking
+    D) Circular chunking
+    Answer: D
+
+Q5. What is the primary purpose of L2 regularization in machine learning?
+    A) Speed up gradient descent
+    B) Prevent overfitting by penalizing large weights
+    C) Increase model capacity
+    D) Reduce training data size
+    Answer: B
+
+Q6. Which Python keyword is used to define a generator function?
+    A) async
+    B) return
+    C) yield
+    D) lambda
+    Answer: C
+
+Q7. What is INT8 quantization?
+    A) Converting model weights from 32-bit float to 8-bit integer
+    B) Adding 8 extra attention heads to a transformer
+    C) Increasing the vocabulary size to 8000 tokens
+    D) Using 8 GPUs in parallel
+    Answer: A
+
+Q8. In the attention mechanism, what do Q, K, and V represent?
+    A) Questions, Keywords, Values
+    B) Query, Key, Value
+    C) Queue, Knowledge, Vector
+    D) Quantized, Kernel, Variable
+    Answer: B
+
+Q9. Which of the following best describes overfitting?
+    A) Model performs well on training data but poorly on unseen data
+    B) Model performs poorly on both training and test data
+    C) Model converges too slowly during training
+    D) Model uses too few parameters
+    Answer: A
+
+Q10. What is the role of an embedding model in a RAG system?
+    A) To generate the final text response
+    B) To convert text into dense numeric vectors for similarity search
+    C) To tokenize the input query
+    D) To rank retrieved documents by date
+    Answer: B
+
+------------------------------------------------------------------------------
+End of Test

@@ -118,8 +118,9 @@ class FeedbackReport(BaseModel):
     candidate_name: str
     role_applied: str
     mcq_score: float = Field(..., description="Auto-marked test score out of 5")
-    programming_q1_score: int = Field(..., ge=1, le=5)
-    programming_q2_score: int = Field(..., ge=1, le=5)
+    mcq_insight: Optional[str] = Field(None, description="One-paragraph insight written by the MCQ Checker Agent")
+    programming_passed: Optional[bool] = Field(None, description="True if the candidate passed the programming logic assessment")
+    programming_insight: Optional[str] = Field(None, description="One-paragraph insight on candidate's programming logic")
 
     # Editable Evaluation Sections
     communication: EvalScore
