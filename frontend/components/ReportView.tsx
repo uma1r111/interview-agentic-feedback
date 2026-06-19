@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { fetchReport, submitDecision, CandidateReport } from "@/lib/api";
+import { saveComment, getComment } from "@/lib/comments";
 import {
   Card, Badge, Metric, SectionTitle, Alert, Btn, ScoreDot, Divider, Spinner,
 } from "./ui";
@@ -17,8 +18,10 @@ export default function ReportView({ candidateId, userRole }: Props) {
   const [ackBias, setAckBias] = useState(false);
   const [ackResp, setAckResp] = useState(false);
   const [decision, setDecision] = useState("Hold");
+  const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState("");
+  const [existingComment, setExistingComment] = useState<{ comment: string; decision: string } | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -26,6 +29,8 @@ export default function ReportView({ candidateId, userRole }: Props) {
     setReport(null);
     setAckDims(false); setAckBias(false); setAckResp(false);
     setSubmitMsg("");
+    setComment("");
+    setExistingComment(getComment(candidateId));
     fetchReport(candidateId)
       .then(setReport)
       .catch((e) => setError(e.message))
@@ -45,11 +50,17 @@ export default function ReportView({ candidateId, userRole }: Props) {
     "Strong Yes": "var(--green)", Yes: "var(--blue)", Maybe: "var(--amber)", No: "var(--red)",
   };
 
+  const isRejection = decision === "Rejected";
+  const commentMissing = isRejection && comment.trim().length === 0;
+
   const handleDecision = async () => {
+    if (commentMissing) return;
     setSubmitting(true);
     setSubmitMsg("");
     try {
       await submitDecision(candidateId, decision);
+      saveComment(candidateId, decision, comment.trim());
+      setExistingComment({ comment: comment.trim(), decision });
       setSubmitMsg(`✅ Decision committed: ${decision}`);
     } catch (e: unknown) {
       setSubmitMsg(`❌ ${e instanceof Error ? e.message : "Unknown error"}`);
@@ -279,21 +290,77 @@ export default function ReportView({ candidateId, userRole }: Props) {
             {!allAck ? (
               <Alert variant="error">⛔ Complete all three acknowledgments above to unlock the decision form.</Alert>
             ) : (
-              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                <select
-                  value={decision}
-                  onChange={(e) => setDecision(e.target.value)}
-                  style={{
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* Existing committed comment */}
+                {existingComment && (
+                  <div style={{
                     background: "var(--surface2)", border: "1px solid var(--border)",
-                    borderRadius: 7, color: "var(--text)", padding: "8px 12px", fontSize: 13,
-                  }}
-                >
-                  {["Hold", "Hired", "Rejected"].map((d) => <option key={d}>{d}</option>)}
-                </select>
-                <Btn variant="primary" onClick={handleDecision} disabled={submitting}>
-                  {submitting ? "Committing..." : "Commit Decision"}
-                </Btn>
-                {submitMsg && <span style={{ fontSize: 13, color: submitMsg.startsWith("✅") ? "var(--green)" : "var(--red)" }}>{submitMsg}</span>}
+                    borderRadius: 8, padding: "12px 14px",
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
+                      Previously committed — {existingComment.decision}
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--text)", fontStyle: existingComment.comment ? "normal" : "italic" }}>
+                      {existingComment.comment || "No comment provided."}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  <select
+                    value={decision}
+                    onChange={(e) => { setDecision(e.target.value); setComment(""); }}
+                    style={{
+                      background: "var(--surface2)", border: "1px solid var(--border)",
+                      borderRadius: 7, color: "var(--text)", padding: "8px 12px", fontSize: 13,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {["Hold", "Hired", "Rejected"].map((d) => <option key={d}>{d}</option>)}
+                  </select>
+
+                  <div style={{ flex: 1 }}>
+                    <textarea
+                      value={comment}
+                      onChange={(e) => setComment(e.target.value)}
+                      placeholder={isRejection
+                        ? "Rejection reason is required — explain why this candidate was not selected…"
+                        : "Optional — add a note about this decision…"
+                      }
+                      rows={3}
+                      style={{
+                        width: "100%", resize: "vertical",
+                        background: "var(--surface2)",
+                        border: `1px solid ${commentMissing ? "var(--red)" : "var(--border)"}`,
+                        borderRadius: 7, color: "var(--text)",
+                        padding: "8px 12px", fontSize: 13,
+                        outline: "none", boxSizing: "border-box",
+                        fontFamily: "inherit",
+                      }}
+                    />
+                    {isRejection && (
+                      <div style={{ fontSize: 11, marginTop: 4, color: commentMissing ? "var(--red)" : "var(--muted)" }}>
+                        {commentMissing ? "⚠️ A rejection reason is mandatory." : "✓ Rejection reason provided."}
+                      </div>
+                    )}
+                    {!isRejection && (
+                      <div style={{ fontSize: 11, marginTop: 4, color: "var(--muted)" }}>
+                        Optional for {decision}.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Btn variant="primary" onClick={handleDecision} disabled={submitting || commentMissing}>
+                    {submitting ? "Committing..." : "Commit Decision"}
+                  </Btn>
+                  {submitMsg && (
+                    <span style={{ fontSize: 13, color: submitMsg.startsWith("✅") ? "var(--green)" : "var(--red)" }}>
+                      {submitMsg}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </>

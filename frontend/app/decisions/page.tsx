@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import { fetchDecisions, CandidateSummary } from "@/lib/api";
+import { getAllComments } from "@/lib/comments";
 import { Badge, Spinner } from "@/components/ui";
 
 const recColor: Record<string, string> = {
@@ -17,8 +18,10 @@ const decisionIcon: Record<string, string> = {
   Hold: "⏸️",
 };
 
-const HM_NAME: Record<string, string> = {
-  "berkha.hm@imperiumdynamics.com": "Berkha",
+const decisionBorderColor: Record<string, string> = {
+  Hired: "rgba(16,185,129,0.3)",
+  Rejected: "rgba(239,68,68,0.3)",
+  Hold: "rgba(245,158,11,0.3)",
 };
 
 export default function DecisionsPage() {
@@ -33,6 +36,7 @@ function DecisionsContent() {
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"All" | "Hired" | "Rejected" | "Hold">("All");
+  const [comments, setComments] = useState<Record<string, { comment: string; decision: string }>>({});
 
   const load = () => {
     setLoading(true);
@@ -40,6 +44,7 @@ function DecisionsContent() {
       .then(setCandidates)
       .catch(() => {})
       .finally(() => setLoading(false));
+    setComments(getAllComments());
   };
 
   useEffect(() => { load(); }, []);
@@ -130,7 +135,7 @@ function DecisionsContent() {
           {/* Table header */}
           <div style={{
             display: "grid",
-            gridTemplateColumns: "2fr 1.2fr 0.8fr 1fr 1.2fr 1fr",
+            gridTemplateColumns: "1.8fr 1fr 0.7fr 1fr 1.1fr 0.9fr",
             padding: "12px 20px",
             borderBottom: "1px solid var(--border)",
             background: "var(--surface2)",
@@ -143,60 +148,87 @@ function DecisionsContent() {
           </div>
 
           {/* Rows */}
-          {filtered.map((c, i) => (
-            <div
-              key={c.candidate_id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "2fr 1.2fr 0.8fr 1fr 1.2fr 1fr",
-                padding: "14px 20px",
-                borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none",
-                alignItems: "center",
-                transition: "background 0.1s",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.02)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
-            >
-              {/* Name + ID */}
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text)" }}>{c.candidate_name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  <code style={{ fontSize: 10 }}>{c.candidate_id}</code>
-                </div>
-              </div>
+          {filtered.map((c, i) => {
+            const entry = comments[c.candidate_id];
+            const hasComment = entry?.comment?.trim();
+            const borderColor = decisionBorderColor[c.hiring_decision] ?? "var(--border)";
 
-              {/* Role */}
-              <div style={{ fontSize: 13, color: "var(--muted)" }}>{c.role_type}</div>
-
-              {/* MCQ */}
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{c.mcq_score}/5</div>
-
-              {/* AI Recommendation */}
-              <div>
-                <span style={{
-                  fontSize: 12, fontWeight: 600,
-                  color: recColor[c.ai_recommendation] ?? "var(--muted)",
+            return (
+              <div
+                key={c.candidate_id}
+                style={{
+                  borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.02)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
+              >
+                {/* Main row */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.8fr 1fr 0.7fr 1fr 1.1fr 0.9fr",
+                  padding: "14px 20px",
+                  alignItems: "center",
                 }}>
-                  {c.ai_recommendation ?? "—"}
-                </span>
-              </div>
+                  {/* Name + ID */}
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text)" }}>{c.candidate_name}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                      <code style={{ fontSize: 10 }}>{c.candidate_id}</code>
+                    </div>
+                  </div>
 
-              {/* Decision */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 15 }}>{decisionIcon[c.hiring_decision] ?? "⚪"}</span>
-                <Badge label={c.hiring_decision ?? "Hold"} />
-              </div>
+                  {/* Role */}
+                  <div style={{ fontSize: 13, color: "var(--muted)" }}>{c.role_type}</div>
 
-              {/* Evaluated date */}
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                {c.evaluated_at ? c.evaluated_at.slice(0, 10) : "—"}
+                  {/* MCQ */}
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{c.mcq_score}/5</div>
+
+                  {/* AI Recommendation */}
+                  <div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: recColor[c.ai_recommendation] ?? "var(--muted)" }}>
+                      {c.ai_recommendation ?? "—"}
+                    </span>
+                  </div>
+
+                  {/* Decision */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 15 }}>{decisionIcon[c.hiring_decision] ?? "⚪"}</span>
+                    <Badge label={c.hiring_decision ?? "Hold"} />
+                  </div>
+
+                  {/* Evaluated date */}
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                    {c.evaluated_at ? c.evaluated_at.slice(0, 10) : "—"}
+                  </div>
+                </div>
+
+                {/* Comment row — shown if comment exists */}
+                {hasComment && (
+                  <div style={{
+                    margin: "0 20px 14px",
+                    padding: "10px 14px",
+                    borderLeft: `3px solid ${borderColor}`,
+                    background: "var(--surface2)",
+                    borderRadius: "0 6px 6px 0",
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>
+                      💬 Hiring Manager Note
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.6 }}>
+                      {entry.comment}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
+                      — Berkha · Hiring Manager
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Footer note */}
       <div style={{ marginTop: 16, fontSize: 12, color: "var(--muted)", textAlign: "right" }}>
         Decisions committed by <strong style={{ color: "var(--accent-light)" }}>Berkha</strong> · Hiring Manager
       </div>
