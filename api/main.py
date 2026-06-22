@@ -7,6 +7,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from api.middleware import (
+    BestPracticeLoggingMiddleware,
+    LimitUploadSizeMiddleware,
+    RateLimiterMiddleware,
+    AITokenCostTrackingMiddleware
+)
 
 from api.schemas import DecisionPatchPayload
 from models.candidate import CandidateBundle
@@ -42,6 +48,10 @@ app = FastAPI(
     description="Backend microservice serving multi-agent evaluation DAG pipelines via LangGraph."
 )
 
+app.add_middleware(LimitUploadSizeMiddleware)
+app.add_middleware(AITokenCostTrackingMiddleware)
+app.add_middleware(BestPracticeLoggingMiddleware)
+app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],

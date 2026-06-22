@@ -92,6 +92,17 @@ class BaseAgent:
                 logger.error(f"Structured output parsing error: {parsing_error}")
                 return None, token_metadata
 
+            # Update global token tracker contextvar if active
+            try:
+                from api.middleware import token_tracker_var
+                tracker = token_tracker_var.get()
+                if tracker is not None:
+                    tracker["prompt_tokens"] += token_metadata["prompt_tokens"]
+                    tracker["completion_tokens"] += token_metadata["completion_tokens"]
+                    tracker["total_tokens"] += token_metadata["total_tokens"]
+            except Exception as tracker_err:
+                logger.warning(f"Failed to update token tracker: {tracker_err}")
+
             if token_metadata["total_tokens"] >= self.token_alert_threshold:
                 logger.critical(
                     f"CRITICAL TOKEN BREACH: {token_metadata['total_tokens']} tokens consumed. "
