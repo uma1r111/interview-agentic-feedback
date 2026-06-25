@@ -1,3 +1,30 @@
+# api/main.py
+"""
+FastAPI application entry point.
+
+ARCHITECTURE CHANGES (Repository Pattern)
+------------------------------------------
+All database access has been moved out of this file into:
+  - CandidateRepository  →  evaluated candidates + decision audit
+  - IntakeRepository     →  two-step candidate intake staging
+
+Route handlers now only:
+  1. Validate HTTP input
+  2. Call a repository or service
+  3. Return an HTTP response
+
+This file no longer contains any SQL, raw DB connections, or schema
+definitions. To switch from SQLite to PostgreSQL, only the repository
+classes change — nothing here.
+
+DEPENDENCY INJECTION
+---------------------
+Both repositories are instantiated once at startup and attached to
+app.state. This makes them accessible in every route via the `Request`
+object, and makes them trivially replaceable in tests by swapping
+app.state before the test runs.
+"""
+
 import json
 import logging
 import os
@@ -5,37 +32,34 @@ import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, status, BackgroundTasks
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
+
 from api.middleware import (
+    AITokenCostTrackingMiddleware,
     BestPracticeLoggingMiddleware,
     LimitUploadSizeMiddleware,
     RateLimiterMiddleware,
-    AITokenCostTrackingMiddleware
 )
-
 from api.schemas import DecisionPatchPayload
-from models.candidate import CandidateBundle
-from models.enums import RoleType, Decision
 from config.settings import get_settings
 from graph.pipeline import create_interview_graph
-from services.database import (
-    get_all_candidates,
-    get_candidate_report,
-    get_decision_audit,
-    init_database,
-    save_candidate,
-    update_hiring_decision,
-    create_candidate_intake,
-    patch_intake_candidate,
-    mark_intake_evaluated,
-    delete_intake_candidate,
-    get_all_intake_candidates,
-    get_intake_candidate,
-    find_intake_by_name,
-)
-from services.pdf_extractor import PDFExtractorService
+from models.candidate import CandidateBundle
+from models.enums import Decision, RoleType
+from repositories.candidate_repository import CandidateRepository
+from repositories.intake_repository import IntakeRepository
 from services.file_extractor import FileExtractorService
+from services.pdf_extractor import PDFExtractorService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("API_Server")
@@ -45,9 +69,10 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_title,
     version=settings.app_version,
-    description="Backend microservice serving multi-agent evaluation DAG pipelines via LangGraph."
+    description="Backend microservice serving multi-agent evaluation DAG pipelines via LangGraph.",
 )
 
+# ── Middleware (order matters — outermost wraps first) ────────────────────────
 app.add_middleware(LimitUploadSizeMiddleware)
 app.add_middleware(AITokenCostTrackingMiddleware)
 app.add_middleware(BestPracticeLoggingMiddleware)
@@ -59,24 +84,64 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Shared service instances (stateless, safe to share) ──────────────────────
 interview_graph = create_interview_graph()
 pdf_extractor = PDFExtractorService()
 file_extractor = FileExtractorService()
 
-
-# ==============================================================================
-# Application Startup
-# ==============================================================================
-
+# ── In-memory progress store (per-process; Redis will replace this in Phase 2) ─
 PROGRESS_STORE: Dict[str, Dict[str, Any]] = {}
 
+
+# ==============================================================================
+# Startup: initialise repositories and attach to app.state
+# ==============================================================================
+
 @app.on_event("startup")
-def on_startup():
-    init_database()
+def on_startup() -> None:
+    """
+    Instantiate repositories with the configured DB path and run schema
+    bootstrap. Attaching to app.state makes them available in every
+    route without importing globals.
+
+    WHY app.state INSTEAD OF MODULE-LEVEL GLOBALS
+    -----------------------------------------------
+    Module-level globals are initialised at import time, which breaks
+    tests that need to swap the DB path before the app starts. app.state
+    is set at runtime, after the test can configure it.
+    """
+    db_path = settings.database_path
+
+    candidate_repo = CandidateRepository(db_path=db_path)
+    intake_repo = IntakeRepository(db_path=db_path)
+
+    # Bootstrap tables (safe to call every startup — CREATE IF NOT EXISTS)
+    candidate_repo.init_schema()
+    intake_repo.init_schema()
+
+    app.state.candidate_repo = candidate_repo
+    app.state.intake_repo = intake_repo
+
+    logger.info(
+        f"Repositories initialised. DB: {db_path} | "
+        f"CandidateRepository ✓ | IntakeRepository ✓"
+    )
 
 
 # ==============================================================================
-# Routes
+# Dependency helpers — thin accessors so routes stay readable
+# ==============================================================================
+
+def get_candidate_repo(request: Request) -> CandidateRepository:
+    return request.app.state.candidate_repo
+
+
+def get_intake_repo(request: Request) -> IntakeRepository:
+    return request.app.state.intake_repo
+
+
+# ==============================================================================
+# Health
 # ==============================================================================
 
 @app.get("/health", status_code=status.HTTP_200_OK)
@@ -88,9 +153,6 @@ def health_check() -> Dict[str, str]:
 # Intake Routes — Two-Step Structured Candidate Registration
 # ==============================================================================
 
-# ---------------------------------------------------------------------------
-# Helper: write candidate_info.json to the candidate's fixtures folder
-# ---------------------------------------------------------------------------
 def _write_candidate_info_json(folder_path: str, data: dict) -> None:
     """Serialises candidate metadata to disk so the folder is self-contained."""
     info_path = os.path.join(folder_path, "candidate_info.json")
@@ -100,34 +162,32 @@ def _write_candidate_info_json(folder_path: str, data: dict) -> None:
 
 @app.post("/intake/create", status_code=status.HTTP_201_CREATED)
 def intake_create_candidate(
-    candidate_name: str = Form(..., description="Full name of the candidate"),
-    role_type: str = Form(..., description="Role enum value: SWE | AI | BA | Trainee"),
+    request: Request,
+    candidate_name: str = Form(...),
+    role_type: str = Form(...),
 ) -> Dict[str, str]:
     """
-    Step 1: Registers a new candidate in the intake system.
-    Creates a unique candidate_id, makes their fixtures folder,
-    writes candidate_info.json, and inserts a DB row with status='awaiting_files'.
-    Returns the candidate_id for use in subsequent Step 2 upload calls.
+    Step 1: Registers a new candidate.
+
+    BEFORE: called create_candidate_intake() from services/database.py
+    AFTER:  calls intake_repo.save() — no SQL in this file
     """
-    # Validate role_type
     try:
         RoleType(role_type)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid role_type '{role_type}'. Valid values: SWE, AI, BA, Trainee"
+            detail=f"Invalid role_type '{role_type}'. Valid values: SWE, AI, BA, Trainee",
         )
 
     name_slug = candidate_name.lower().replace(" ", "_")
-    unique_suffix = str(uuid.uuid4())[:8]
-    candidate_id = f"cand_{name_slug}_{unique_suffix}"
-
+    candidate_id = f"cand_{name_slug}_{str(uuid.uuid4())[:8]}"
     folder_path = os.path.join("fixtures", "candidates", candidate_id)
 
-    create_candidate_intake(
+    # Repository handles DB insert + folder creation
+    get_intake_repo(request).save(
         candidate_id=candidate_id,
-        candidate_name=candidate_name,
-        role_type=role_type,
+        data={"candidate_name": candidate_name, "role_type": role_type},
     )
 
     _write_candidate_info_json(folder_path, {
@@ -137,23 +197,24 @@ def intake_create_candidate(
         "status": "awaiting_files",
     })
 
-    logger.info(f"Intake Step 1 complete — candidate registered: {candidate_id}")
+    logger.info(f"Intake Step 1 complete: {candidate_id}")
     return {
         "candidate_id": candidate_id,
         "status": "awaiting_files",
-        "message": f"Candidate '{candidate_name}' registered. Upload files to complete intake."
+        "message": f"Candidate '{candidate_name}' registered. Upload files to complete intake.",
     }
 
 
 @app.get("/intake/check-duplicate", status_code=status.HTTP_200_OK)
 def check_duplicate_name(
-    name: str = Query(..., description="Candidate name to check for duplicates")
+    request: Request,
+    name: str = Query(...),
 ) -> Dict[str, Any]:
     """
-    Checks whether any existing intake record has the same candidate name.
-    Returns a list of matching records so the dashboard can warn HR before creating.
+    BEFORE: called find_intake_by_name() from services/database.py
+    AFTER:  calls intake_repo.find_by_name()
     """
-    matches = find_intake_by_name(name)
+    matches = get_intake_repo(request).find_by_name(name)
     return {
         "name": name,
         "has_duplicates": len(matches) > 0,
@@ -162,27 +223,32 @@ def check_duplicate_name(
 
 
 @app.get("/intake/candidates", status_code=status.HTTP_200_OK)
-def list_intake_candidates() -> List[Dict[str, Any]]:
-    """Returns all intake candidate rows (all statuses) for the intake queue dashboard."""
-    return get_all_intake_candidates()
+def list_intake_candidates(request: Request) -> List[Dict[str, Any]]:
+    """
+    BEFORE: called get_all_intake_candidates() from services/database.py
+    AFTER:  calls intake_repo.get_all()
+    """
+    return get_intake_repo(request).get_all()
 
 
 @app.delete("/intake/{candidate_id}", status_code=status.HTTP_200_OK)
-def delete_intake_record(candidate_id: str) -> Dict[str, str]:
+def delete_intake_record(
+    request: Request,
+    candidate_id: str,
+) -> Dict[str, str]:
     """
-    Deletes an intake candidate record that is still in 'awaiting_files' status.
-    Removes:
-      - The DB row from candidate_intake
-      - The entire fixtures/candidates/{candidate_id}/ folder and its contents
+    BEFORE: called get_intake_candidate() + delete_intake_candidate() from services/database.py
+    AFTER:  calls intake_repo.get_by_id() + intake_repo.delete()
 
-    Raises 409 if the candidate is 'ready' or 'evaluated' — those records are
-    protected and must not be silently discarded.
+    Only 'awaiting_files' candidates can be deleted — guards are unchanged.
     """
-    intake = get_intake_candidate(candidate_id)
+    intake_repo = get_intake_repo(request)
+    intake = intake_repo.get_by_id(candidate_id)
+
     if not intake:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No intake record found for '{candidate_id}'."
+            detail=f"No intake record found for '{candidate_id}'.",
         )
     if intake["status"] != "awaiting_files":
         raise HTTPException(
@@ -190,67 +256,72 @@ def delete_intake_record(candidate_id: str) -> Dict[str, str]:
             detail=(
                 f"Cannot delete candidate '{candidate_id}' with status '{intake['status']}'. "
                 "Only 'awaiting_files' candidates can be deleted."
-            )
+            ),
         )
 
-    # Delete DB row
-    delete_intake_candidate(candidate_id)
+    intake_repo.delete(candidate_id)
 
-    # Remove fixtures folder (best-effort — don't fail if already gone)
     folder_path = os.path.join("fixtures", "candidates", candidate_id)
     if os.path.isdir(folder_path):
         shutil.rmtree(folder_path)
         logger.info(f"Deleted fixtures folder: {folder_path}")
-    else:
-        logger.warning(f"Fixtures folder not found (already removed?): {folder_path}")
 
-    logger.info(f"Intake candidate deleted: {candidate_id} ({intake['candidate_name']})")
     return {
         "candidate_id": candidate_id,
-        "message": f"Candidate '{intake['candidate_name']}' deleted from DB and file system."
+        "message": f"Candidate '{intake['candidate_name']}' deleted from DB and file system.",
     }
 
 
 @app.get("/intake/{candidate_id}", status_code=status.HTTP_200_OK)
-def get_intake_record(candidate_id: str) -> Dict[str, Any]:
-    """Returns the full intake record for a single candidate (all fields)."""
-    record = get_intake_candidate(candidate_id)
+def get_intake_record(
+    request: Request,
+    candidate_id: str,
+) -> Dict[str, Any]:
+    """
+    BEFORE: called get_intake_candidate() from services/database.py
+    AFTER:  calls intake_repo.get_by_id()
+    """
+    record = get_intake_repo(request).get_by_id(candidate_id)
     if not record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No intake record found for '{candidate_id}'."
+            detail=f"No intake record found for '{candidate_id}'.",
         )
     return record
 
 
 @app.post("/intake/{candidate_id}/upload", status_code=status.HTTP_200_OK)
 async def intake_upload_files(
+    request: Request,
     candidate_id: str,
-    cv_file:       Optional[UploadFile] = File(None, description="CV — PDF only"),
-    session1_file: Optional[UploadFile] = File(None, description="Session 1 transcript — PDF, TXT, or DOCX"),
-    session2_file: Optional[UploadFile] = File(None, description="Session 2 transcript — PDF, TXT, or DOCX"),
-    mcq_file:      Optional[UploadFile] = File(None, description="MCQ results document — PDF, TXT, or DOCX"),
-    prog_file_1:   Optional[UploadFile] = File(None, description="Programming Answers document (both Q1 & Q2) — PDF, TXT, or DOCX"),
+    cv_file:       Optional[UploadFile] = File(None),
+    session1_file: Optional[UploadFile] = File(None),
+    session2_file: Optional[UploadFile] = File(None),
+    mcq_file:      Optional[UploadFile] = File(None),
+    prog_file_1:   Optional[UploadFile] = File(None),
 ) -> Dict[str, Any]:
     """
-    Partial/incremental upload endpoint — all files are optional.
-    Each call saves only the files provided and patches those fields in the DB.
-    Status auto-recalculates: 'ready' when all 7 fields are present,
-    'awaiting_files' otherwise.
+    Partial/incremental upload — all files optional per call.
 
-    HR can call this any number of times to upload documents incrementally
-    or replace a previously saved file.
+    BEFORE: called get_intake_candidate() + patch_intake_candidate()
+            from services/database.py
+    AFTER:  calls intake_repo.get_by_id() + intake_repo.update()
+
+    Status auto-recalculates inside intake_repo.update() — no logic
+    needed here.
     """
-    intake = get_intake_candidate(candidate_id)
+    intake_repo = get_intake_repo(request)
+    intake = intake_repo.get_by_id(candidate_id)
+
     if not intake:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No intake record found for '{candidate_id}'. Run Step 1 first."
+            detail=f"No intake record found for '{candidate_id}'. Run Step 1 first.",
         )
     if intake["status"] == "evaluated":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Candidate '{candidate_id}' has already been evaluated and cannot be modified."
+            detail=f"Candidate '{candidate_id}' has already been evaluated.",
         )
 
     folder_path = os.path.join("fixtures", "candidates", candidate_id)
@@ -259,13 +330,13 @@ async def intake_upload_files(
     patch_fields: Dict[str, Any] = {}
     saved_files: Dict[str, str] = {}
 
-    # ── CV ────────────────────────────────────────────────────────────────────
+    # ── CV ────────────────────────────────────────────────────────────
     if cv_file and cv_file.filename:
         if not cv_file.filename.lower().endswith(".pdf") \
                 and cv_file.content_type not in ("application/pdf", "application/octet-stream"):
             raise HTTPException(
                 status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail=f"CV must be a PDF. Received: '{cv_file.filename}'."
+                detail=f"CV must be a PDF. Received: '{cv_file.filename}'.",
             )
         cv_bytes = await cv_file.read()
         cv_path = os.path.join(folder_path, "cv.pdf")
@@ -273,9 +344,8 @@ async def intake_upload_files(
             f.write(cv_bytes)
         patch_fields["cv_path"] = cv_path
         saved_files["cv"] = cv_path
-        logger.info(f"CV saved: {cv_path}")
 
-    # ── Session 1 ─────────────────────────────────────────────────────────────
+    # ── Session 1 ─────────────────────────────────────────────────────
     if session1_file and session1_file.filename:
         s1_bytes = await session1_file.read()
         try:
@@ -287,9 +357,8 @@ async def intake_upload_files(
             f.write(s1_text)
         patch_fields["session1_path"] = s1_path
         saved_files["session1_transcript"] = s1_path
-        logger.info(f"Session 1 saved: {s1_path}")
 
-    # ── Session 2 ─────────────────────────────────────────────────────────────
+    # ── Session 2 ─────────────────────────────────────────────────────
     if session2_file and session2_file.filename:
         s2_bytes = await session2_file.read()
         try:
@@ -301,9 +370,8 @@ async def intake_upload_files(
             f.write(s2_text)
         patch_fields["session2_path"] = s2_path
         saved_files["session2_transcript"] = s2_path
-        logger.info(f"Session 2 saved: {s2_path}")
 
-    # ── MCQ (raw file save — no parsing at intake stage) ─────────────────────
+    # ── MCQ file ──────────────────────────────────────────────────────
     if mcq_file and mcq_file.filename:
         mcq_bytes = await mcq_file.read()
         mcq_ext = mcq_file.filename.rsplit(".", 1)[-1] if "." in mcq_file.filename else "bin"
@@ -312,9 +380,8 @@ async def intake_upload_files(
             f.write(mcq_bytes)
         patch_fields["mcq_path"] = mcq_path
         saved_files["mcq_answers"] = mcq_path
-        logger.info(f"MCQ file saved: {mcq_path} ({len(mcq_bytes)} bytes) — will be scored during evaluation")
 
-    # ── Programming Answers (single combined document — save file, store path) ─────
+    # ── Programming answers ───────────────────────────────────────────
     if prog_file_1 and prog_file_1.filename:
         p1_bytes = await prog_file_1.read()
         p1_ext = prog_file_1.filename.rsplit(".", 1)[-1] if "." in prog_file_1.filename else "bin"
@@ -323,31 +390,29 @@ async def intake_upload_files(
             f.write(p1_bytes)
         patch_fields["programming_path"] = p1_path
         saved_files["programming_answers"] = p1_path
-        logger.info(f"Programming answers saved: {p1_path} ({len(p1_bytes)} bytes) — will be evaluated by agent")
 
     if not patch_fields:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No files were provided. Include at least one file per call."
+            detail="No files were provided. Include at least one file per call.",
         )
 
-    # ── Patch DB + refresh candidate_info.json ────────────────────────────────
-    patch_intake_candidate(candidate_id, **patch_fields)
-    updated = get_intake_candidate(candidate_id)
+    # Repository update: patches DB fields and recalculates status
+    intake_repo.update(candidate_id, patch_fields)
+    updated = intake_repo.get_by_id(candidate_id)
 
     _write_candidate_info_json(folder_path, {
-        "candidate_id":       candidate_id,
-        "candidate_name":     updated["candidate_name"],
-        "role_type":          updated["role_type"],
-        "mcq_path":           updated.get("mcq_path"),
-        "programming_path":   updated.get("programming_path"),
-        "cv_path":            updated.get("cv_path"),
-        "session1_path":      updated.get("session1_path"),
-        "session2_path":      updated.get("session2_path"),
-        "status":             updated["status"],
+        "candidate_id":     candidate_id,
+        "candidate_name":   updated["candidate_name"],
+        "role_type":        updated["role_type"],
+        "mcq_path":         updated.get("mcq_path"),
+        "programming_path": updated.get("programming_path"),
+        "cv_path":          updated.get("cv_path"),
+        "session1_path":    updated.get("session1_path"),
+        "session2_path":    updated.get("session2_path"),
+        "status":           updated["status"],
     })
 
-    logger.info(f"Upload complete for {candidate_id}: {list(saved_files.keys())} | status={updated['status']}")
     return {
         "candidate_id": candidate_id,
         "status": updated["status"],
@@ -361,28 +426,40 @@ async def intake_upload_files(
 
 
 @app.post("/intake/{candidate_id}/evaluate", status_code=status.HTTP_200_OK)
-def intake_run_evaluation(candidate_id: str, background_tasks: BackgroundTasks) -> Dict[str, str]:
+def intake_run_evaluation(
+    request: Request,
+    candidate_id: str,
+    background_tasks: BackgroundTasks,
+) -> Dict[str, str]:
     """
-    Step 3: Triggers the full LangGraph multi-agent evaluation pipeline
-    for a candidate in the background. Returns immediately.
+    Step 3: Triggers background evaluation.
+
+    BEFORE: called get_intake_candidate() from services/database.py
+    AFTER:  calls intake_repo.get_by_id()
+
+    The background task receives repository instances directly so it
+    doesn't need to re-access app.state from a different thread context.
     """
-    intake = get_intake_candidate(candidate_id)
+    intake_repo = get_intake_repo(request)
+    candidate_repo = get_candidate_repo(request)
+
+    intake = intake_repo.get_by_id(candidate_id)
     if not intake:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No intake record found for candidate_id '{candidate_id}'."
+            detail=f"No intake record found for '{candidate_id}'.",
         )
     if intake["status"] != "ready":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Candidate '{candidate_id}' is not ready for evaluation. "
+                f"Candidate '{candidate_id}' is not ready. "
                 f"Current status: '{intake['status']}'. "
-                f"Complete file upload (Step 2) first."
-            )
+                "Complete file upload (Step 2) first."
+            ),
         )
 
-    # -- Extract CV text from saved PDF --
+    # Extract CV text
     try:
         with open(intake["cv_path"], "rb") as f:
             pdf_bytes = f.read()
@@ -390,10 +467,10 @@ def intake_run_evaluation(candidate_id: str, background_tasks: BackgroundTasks) 
     except Exception as cv_err:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"CV PDF extraction failed: {str(cv_err)}"
+            detail=f"CV PDF extraction failed: {cv_err}",
         )
 
-    # -- Read saved transcripts --
+    # Read transcripts
     try:
         with open(intake["session1_path"], "r", encoding="utf-8") as f:
             session1_transcript = f.read()
@@ -402,41 +479,38 @@ def intake_run_evaluation(candidate_id: str, background_tasks: BackgroundTasks) 
     except Exception as file_err:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to read transcript files: {str(file_err)}"
+            detail=f"Failed to read transcript files: {file_err}",
         )
 
-    # -- Guard: verify all required file paths are present --
+    # Guard: all required paths present
     missing = [
         field for field, val in [
             ("Programming Answers", intake.get("programming_path")),
-            ("MCQ Answers",         intake.get("mcq_path")),
-            ("CV",                  intake.get("cv_path")),
-            ("Session 1 Transcript",intake.get("session1_path")),
-            ("Session 2 Transcript",intake.get("session2_path")),
+            ("MCQ Answers",          intake.get("mcq_path")),
+            ("CV",                   intake.get("cv_path")),
+            ("Session 1 Transcript", intake.get("session1_path")),
+            ("Session 2 Transcript", intake.get("session2_path")),
         ] if not val
     ]
     if missing:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Candidate record is missing required files: {', '.join(missing)}. "
-                "Please re-upload the missing documents in Step 2 and try again."
-            )
+            detail=f"Missing required files: {', '.join(missing)}.",
         )
 
-    # -- Read programming answers from saved file --
+    # Read programming answers
     try:
         with open(intake["programming_path"], "rb") as f:
             prog_bytes = f.read()
         programming_text = file_extractor.extract(
             prog_bytes,
             os.path.basename(intake["programming_path"]),
-            None
+            None,
         )
     except Exception as prog_err:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to read programming answers file: {str(prog_err)}"
+            detail=f"Failed to read programming answers: {prog_err}",
         )
 
     try:
@@ -444,21 +518,17 @@ def intake_run_evaluation(candidate_id: str, background_tasks: BackgroundTasks) 
             candidate_name=intake["candidate_name"],
             role_type=RoleType(intake["role_type"]),
             raw_cv=raw_cv_text,
-            mcq_score=0.0,              # placeholder — MCQ Agent will score during pipeline
-            programming_answers=[
-                programming_text,       # full answers doc text for Programming Agent
-                programming_text,       # duplicate so downstream list access is safe
-            ],
+            mcq_score=0.0,
+            programming_answers=[programming_text, programming_text],
             session1_transcript=session1_transcript,
             session2_transcript=session2_transcript,
         )
     except Exception as validation_err:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Candidate bundle validation failed: {str(validation_err)}"
+            detail=f"Bundle validation failed: {validation_err}",
         )
 
-    # -- Assemble initial state for LangGraph --
     initial_inputs = {
         "candidate_name":      candidate_bundle.candidate_name,
         "role_type":           candidate_bundle.role_type,
@@ -473,28 +543,46 @@ def intake_run_evaluation(candidate_id: str, background_tasks: BackgroundTasks) 
         "mcq_responses":       {},
     }
 
-    # -- Dispatch Background Task --
-    background_tasks.add_task(run_evaluation_background, candidate_id, initial_inputs)
+    # Pass repository instances into the background task — avoids
+    # re-accessing app.state from a background thread
+    background_tasks.add_task(
+        run_evaluation_background,
+        candidate_id,
+        initial_inputs,
+        candidate_repo,
+        intake_repo,
+    )
 
-    logger.info(f"Intake evaluation background task dispatched for: {candidate_id}")
+    logger.info(f"Evaluation background task dispatched for: {candidate_id}")
     return {
         "candidate_id": candidate_id,
         "status": "running",
-        "message": "Evaluation started in the background."
+        "message": "Evaluation started in the background.",
     }
 
-def run_evaluation_background(candidate_id: str, initial_inputs: dict):
+
+def run_evaluation_background(
+    candidate_id: str,
+    initial_inputs: dict,
+    candidate_repo: CandidateRepository,
+    intake_repo: IntakeRepository,
+) -> None:
     """
-    Executes the interview graph synchronously in a background thread,
-    streaming state updates to the PROGRESS_STORE for UI polling.
+    Executes the LangGraph pipeline in a background thread.
+
+    BEFORE: called save_candidate() + mark_intake_evaluated()
+            from services/database.py
+    AFTER:  calls candidate_repo.save() + intake_repo.mark_evaluated()
+
+    Repositories are injected as parameters — the function has no
+    hidden dependency on module-level globals or app.state.
     """
-    logger.info(f"Starting background evaluation for {candidate_id}")
+    logger.info(f"Background evaluation started: {candidate_id}")
     PROGRESS_STORE[candidate_id] = {"status": "running", "events": []}
-    
+
     try:
         final_output_state = dict(initial_inputs)
-        
-        # stream_mode="updates" yields {node_name: {state_update}} after each node
+
         for update in interview_graph.stream(initial_inputs, stream_mode="updates"):
             for node_name, state_update in update.items():
                 logger.info(f"Completed node: {node_name}")
@@ -502,78 +590,114 @@ def run_evaluation_background(candidate_id: str, initial_inputs: dict):
                 final_output_state.update(state_update)
 
         if final_output_state.get("error"):
-            logger.error(f"Pipeline aborted in background: {final_output_state['error']}")
+            logger.error(f"Pipeline error: {final_output_state['error']}")
             PROGRESS_STORE[candidate_id]["status"] = "failed"
             PROGRESS_STORE[candidate_id]["error"] = final_output_state["error"]
             return
 
-        # Save to DB
         final_output_state["candidate_id"] = candidate_id
-        save_candidate(candidate_id, final_output_state)
-        mark_intake_evaluated(candidate_id)
 
-        logger.info(f"Background evaluation successfully completed for {candidate_id}")
+        # Repository calls — no SQL in this file
+        candidate_repo.save(candidate_id, final_output_state)
+        intake_repo.mark_evaluated(candidate_id)
+
+        logger.info(f"Background evaluation completed: {candidate_id}")
         PROGRESS_STORE[candidate_id]["status"] = "completed"
-        
+
     except Exception as pipeline_err:
-        logger.error(f"Background evaluation error: {str(pipeline_err)}")
+        logger.error(f"Background evaluation error: {pipeline_err}")
         PROGRESS_STORE[candidate_id]["status"] = "failed"
-        PROGRESS_STORE[candidate_id]["error"] = f"Pipeline execution error: {str(pipeline_err)}"
+        PROGRESS_STORE[candidate_id]["error"] = f"Pipeline execution error: {pipeline_err}"
+
 
 @app.get("/intake/{candidate_id}/progress", status_code=status.HTTP_200_OK)
-def get_evaluation_progress(candidate_id: str) -> Dict[str, Any]:
-    """Returns the live streaming progress of a background evaluation."""
+def get_evaluation_progress(
+    request: Request,
+    candidate_id: str,
+) -> Dict[str, Any]:
+    """Returns live streaming progress. Falls back to DB check on server restart."""
     if candidate_id not in PROGRESS_STORE:
-        # Check DB in case the server restarted but it was evaluated
-        intake = get_intake_candidate(candidate_id)
+        intake = get_intake_repo(request).get_by_id(candidate_id)
         if intake and intake.get("status") == "evaluated":
             return {"status": "completed", "events": ["Evaluation already complete"]}
         return {"status": "not_started", "events": []}
-    
     return PROGRESS_STORE[candidate_id]
 
 
+# ==============================================================================
+# Candidate / Report Routes
+# ==============================================================================
+
 @app.get("/candidates", status_code=status.HTTP_200_OK)
-def list_candidates() -> List[Dict[str, Any]]:
-    """Returns lightweight candidate list for dashboard navigation."""
-    return get_all_candidates()
+def list_candidates(request: Request) -> List[Dict[str, Any]]:
+    """
+    BEFORE: called get_all_candidates() from services/database.py
+    AFTER:  calls candidate_repo.get_all()
+    """
+    return get_candidate_repo(request).get_all()
 
 
 @app.get("/candidates/{candidate_id}/report", status_code=status.HTTP_200_OK)
-def get_report(candidate_id: str) -> Any:
-    """Fetches the final structured evaluation feedback report for a candidate."""
-    report = get_candidate_report(candidate_id)
+def get_report(request: Request, candidate_id: str) -> Any:
+    """
+    BEFORE: called get_candidate_report() from services/database.py
+    AFTER:  calls candidate_repo.get_by_id()
+    """
+    report = get_candidate_repo(request).get_by_id(candidate_id)
     if not report:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Candidate '{candidate_id}' not found."
+            detail=f"Candidate '{candidate_id}' not found.",
         )
     return report
 
 
 @app.get("/candidates/{candidate_id}/audit", status_code=status.HTTP_200_OK)
-def get_audit_trail(candidate_id: str) -> List[Dict[str, Any]]:
-    """Returns the full decision audit trail for a candidate."""
-    audit = get_decision_audit(candidate_id)
+def get_audit_trail(
+    request: Request,
+    candidate_id: str,
+) -> List[Dict[str, Any]]:
+    """
+    BEFORE: called get_decision_audit() from services/database.py
+    AFTER:  calls candidate_repo.get_decision_audit()
+    """
+    audit = get_candidate_repo(request).get_decision_audit(candidate_id)
     if not audit:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No audit records found for candidate '{candidate_id}'."
+            detail=f"No audit records found for '{candidate_id}'.",
         )
     return audit
 
 
 @app.patch("/candidates/{candidate_id}/decision", status_code=status.HTTP_200_OK)
-def patch_decision(candidate_id: str, payload: DecisionPatchPayload) -> Dict[str, str]:
-    """Updates a candidate's hiring decision. Only the decision column is updated."""
-    updated = update_hiring_decision(candidate_id, payload.decision)
+def patch_decision(
+    request: Request,
+    candidate_id: str,
+    payload: DecisionPatchPayload,
+) -> Dict[str, str]:
+    """
+    Updates the hiring decision and writes an audit trail entry.
+
+    BEFORE: called update_hiring_decision() from services/database.py
+    AFTER:  calls candidate_repo.update_decision()
+
+    The audit trail logic lives inside update_decision() — it is a
+    domain rule, not a route concern. This route only validates the
+    HTTP input and delegates.
+    """
+    updated = get_candidate_repo(request).update_decision(
+        candidate_id=candidate_id,
+        new_decision=payload.decision,
+        changed_by="hiring_manager",
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Candidate '{candidate_id}' not found."
+            detail=f"Candidate '{candidate_id}' not found.",
         )
     return {
         "candidate_id": candidate_id,
         "decision_status": payload.decision,
-        "message": "Hiring decision recorded and audit trail updated."
+        "message": "Hiring decision recorded and audit trail updated.",
     }
