@@ -1,0 +1,72 @@
+# =============================================================================
+# .dockerignore
+# =============================================================================
+# Keeps the Docker build context small. Files listed here are never
+# sent to the Docker daemon — speeds up builds and prevents secrets
+# from leaking into image layers.
+# =============================================================================
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PDM
+.pdm-python
+.pdm-build/
+
+# Tests and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Environment files — NEVER bake secrets into images
+.env
+.env.*
+!.env.example
+
+# SQLite database files — use Postgres in Docker
+*.db
+*.sqlite
+*.sqlite3
+
+# Candidate fixture uploads (mounted as volume instead)
+fixtures/candidates/
+
+# Node (frontend has its own .dockerignore but belt-and-suspenders)
+frontend/node_modules/
+frontend/.next/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+docs/

@@ -1,0 +1,131 @@
+# =============================================================================
+# docker-compose.yml
+# =============================================================================
+# WHY healthchecks on postgres and redis:
+#   depends_on only waits for the *container* to start, not for the
+#   *service inside* to be ready. Without healthchecks, the backend
+#   starts, tries to connect to Postgres immediately, gets "connection
+#   refused", and crashes. Healthchecks make depends_on wait until
+#   Postgres is actually accepting connections.
+#
+# SERVICE NETWORK:
+#   All services share the `platform_network` bridge network.
+#   Services reach each other by container name:
+#     backend  → postgres_db:5432
+#     backend  → redis_cache:6379
+#     frontend → backend:8000  (server-side fetches)
+#   Browser fetches from frontend JS still go to localhost:8000
+#   (mapped via ports) — override NEXT_PUBLIC_API_URL for production.
+# =============================================================================
+
+version: '3.8'
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres_db:
+    image: postgres:15-alpine
+    container_name: platform_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_db_password}
+      POSTGRES_DB: ${POSTGRES_DB:-interview_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready exits 0 only when Postgres is accepting connections
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-interview_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - platform_network
+    restart: unless-stopped
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis_cache:
+    image: redis:7-alpine
+    container_name: platform_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      # redis-cli ping returns PONG when ready
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - platform_network
+    restart: unless-stopped
+
+  # ── Backend (FastAPI) ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: platform_backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Database — SQLAlchemy async URL format
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_db_password}@postgres_db:5432/${POSTGRES_DB:-interview_db}
+      # Redis
+      REDIS_URL: redis://redis_cache:6379/0
+      # Azure OpenAI — loaded from .env file (never hardcoded)
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      OPENAI_API_VERSION: ${OPENAI_API_VERSION}
+      AZURE_OPENAI_CHAT_DEPLOYMENT_NAME: ${AZURE_OPENAI_CHAT_DEPLOYMENT_NAME}
+      # App
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.0}
+      TOKEN_ALERT_THRESHOLD: ${TOKEN_ALERT_THRESHOLD:-80000}
+    depends_on:
+      postgres_db:
+        condition: service_healthy   # waits for pg_isready to pass
+      redis_cache:
+        condition: service_healthy   # waits for redis PONG
+    volumes:
+      # Persist candidate fixture files outside the container
+      - ./fixtures:/app/fixtures
+      - ./rubrics:/app/rubrics
+    networks:
+      - platform_network
+    restart: unless-stopped
+
+  # ── Frontend (Next.js) ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked into the JS bundle at build time for browser fetches.
+        # For local Docker: localhost:8000 (ports mapping makes it work)
+        # For production: replace with your actual API domain
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: platform_frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - platform_network
+    restart: unless-stopped
+
+# ── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  platform_network:
+    driver: bridge
