@@ -8,3 +8,9 @@
 - P0-03 DEFERRED: API has no authentication. Safe for localhost development only. Must 
                   implement API key auth before any network deployment or internal rollout.
 
+Docker Commands:
+
+To stop: docker-compose down or ctrl + c
+Restart with logs: docker-compose up
+Restart without logs: docker-compose up -d
+After code change: docker-compose up --build -d
