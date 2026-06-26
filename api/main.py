@@ -58,6 +58,9 @@ from models.candidate import CandidateBundle
 from models.enums import Decision, RoleType
 from repositories.candidate_repository import CandidateRepository
 from repositories.intake_repository import IntakeRepository
+from repositories.postgres_candidate_repository import PostgresCandidateRepository
+from repositories.postgres_intake_repository import PostgresIntakeRepository
+from services.connection_manager import DatabaseManager, CacheManager
 from services.file_extractor import FileExtractorService
 from services.pdf_extractor import PDFExtractorService
 
@@ -79,7 +82,7 @@ app.add_middleware(BestPracticeLoggingMiddleware)
 app.add_middleware(RateLimiterMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://frontend:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -100,22 +103,23 @@ PROGRESS_STORE: Dict[str, Dict[str, Any]] = {}
 @app.on_event("startup")
 def on_startup() -> None:
     """
-    Instantiate repositories with the configured DB path and run schema
-    bootstrap. Attaching to app.state makes them available in every
-    route without importing globals.
-
-    WHY app.state INSTEAD OF MODULE-LEVEL GLOBALS
-    -----------------------------------------------
-    Module-level globals are initialised at import time, which breaks
-    tests that need to swap the DB path before the app starts. app.state
-    is set at runtime, after the test can configure it.
+    Injects Postgres repos when DATABASE_URL is set (Docker),
+    falls back to SQLite repos for local development.
     """
-    db_path = settings.database_path
+    if settings.database_url:
+        db = DatabaseManager()
+        db.initialize(settings.database_url)
+        CacheManager().initialize(settings.redis_url)
 
-    candidate_repo = CandidateRepository(db_path=db_path)
-    intake_repo = IntakeRepository(db_path=db_path)
+        candidate_repo = PostgresCandidateRepository()
+        intake_repo = PostgresIntakeRepository()
+        db_label = settings.database_url.split("@")[-1]  # hide credentials in log
+    else:
+        db_path = settings.database_path
+        candidate_repo = CandidateRepository(db_path=db_path)
+        intake_repo = IntakeRepository(db_path=db_path)
+        db_label = db_path
 
-    # Bootstrap tables (safe to call every startup — CREATE IF NOT EXISTS)
     candidate_repo.init_schema()
     intake_repo.init_schema()
 
@@ -123,8 +127,8 @@ def on_startup() -> None:
     app.state.intake_repo = intake_repo
 
     logger.info(
-        f"Repositories initialised. DB: {db_path} | "
-        f"CandidateRepository ✓ | IntakeRepository ✓"
+        f"Repositories initialised. DB: {db_label} | "
+        f"{type(candidate_repo).__name__} ✓ | {type(intake_repo).__name__} ✓"
     )
 
 
@@ -132,11 +136,11 @@ def on_startup() -> None:
 # Dependency helpers — thin accessors so routes stay readable
 # ==============================================================================
 
-def get_candidate_repo(request: Request) -> CandidateRepository:
+def get_candidate_repo(request: Request):
     return request.app.state.candidate_repo
 
 
-def get_intake_repo(request: Request) -> IntakeRepository:
+def get_intake_repo(request: Request):
     return request.app.state.intake_repo
 
 
