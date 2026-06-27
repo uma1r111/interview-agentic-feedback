@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # Falls back to empty string — CacheManager handles the missing case
     redis_url: str = ""
 
+    # ── CORS ──────────────────────────────────────────────────────────────────
+    # Comma-separated list of allowed origins.
+    # Local default covers Docker and local dev.
+    # In Azure Container Apps set:
+    #   ALLOWED_ORIGINS=https://platform-frontend.livelybay-74bfa788.centralus.azurecontainerapps.io
+    allowed_origins: str = "http://localhost:3000,http://frontend:3000"
+
     # ── Azure Storage (optional) ──────────────────────────────────────────────
     azure_storage_connection_string: str = ""
     azure_storage_container_name: str = ""
