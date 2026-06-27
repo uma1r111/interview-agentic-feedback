@@ -1,0 +1,57 @@
+name: Continuous Deployment to Azure Container Apps
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry (ACR)
+        uses: azure/docker-login@v1
+        with:
+          login-server: umairazureacr.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      # ── Build & Deploy Backend ─────────────────────────────────────────────
+      - name: Build and Push Backend Image
+        run: |
+          docker build -t umairazureacr.azurecr.io/interview-backend:${{ github.sha }} .
+          docker push umairazureacr.azurecr.io/interview-backend:${{ github.sha }}
+
+      - name: Update Backend Container App
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: rg-interview-platform
+          containerAppName: platform-backend
+          imageToDeploy: umairazureacr.azurecr.io/interview-backend:${{ github.sha }}
+
+      # ── Build & Deploy Frontend ────────────────────────────────────────────
+      - name: Build and Push Frontend Image
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL="https://platform-backend.livelybay-74bfa788.centralus.azurecontainerapps.io" \
+            -t umairazureacr.azurecr.io/interview-frontend:${{ github.sha }} ./frontend
+          docker push umairazureacr.azurecr.io/interview-frontend:${{ github.sha }}
+
+      - name: Update Frontend Container App
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          resourceGroup: rg-interview-platform
+          containerAppName: platform-frontend
+          imageToDeploy: umairazureacr.azurecr.io/interview-frontend:${{ github.sha }}
