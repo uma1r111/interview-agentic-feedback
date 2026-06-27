@@ -24,7 +24,7 @@ COPY . .
 # Inside the Docker network, frontend talks to backend service by name.
 # For browser requests (client-side fetches), this needs to be the
 # publicly accessible URL — override at deploy time if needed.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
 RUN npm run build
